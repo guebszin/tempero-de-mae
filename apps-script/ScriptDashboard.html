@@ -1,0 +1,265 @@
+<script>
+// ================================================================
+// DASHBOARD (restaurante)
+// Gráficos de pizza simples: cada um com legenda (nome, valor e %),
+// para a informação nunca depender só da cor. As cores vêm do CSS
+// (--serie-1 … --serie-6), com tons próprios no modo escuro.
+// ================================================================
+const dashboard = {
+  periodo: 'ESTE_MES',
+  dados: {},        // { periodo: { dados, em } }
+  pedidoAtual: 0
+};
+
+AO_SAIR.push(function() {
+  dashboard.periodo = 'ESTE_MES';
+  dashboard.dados = {};
+});
+
+TELAS['dashboard'] = { carregar: carregarDashboard };
+
+// Cores fixas para a situação do dinheiro (sempre o mesmo significado)
+const CORES_SITUACAO = {
+  recebido: 'var(--serie-verde)',
+  a_receber: 'var(--serie-1)',
+  vencido: 'var(--serie-vermelho)',
+  nao_cobrado: 'var(--serie-outras)',
+  desconto: 'var(--serie-4)'
+};
+
+function carregarDashboard() {
+  const periodo = dashboard.periodo;
+  const guardado = dashboard.dados[periodo];
+  const conteudo = $('dashboardConteudo');
+
+  if (guardado) renderizarDashboard(guardado.dados);
+  else mostrarCarregandoLista(conteudo, 3);
+
+  if (guardado && recente(guardado.em)) return;
+
+  const pedido = ++dashboard.pedidoAtual;
+  apiSessao('obterDashboard', periodo)
+    .then(function(dados) {
+      dashboard.dados[periodo] = { dados: dados, em: Date.now() };
+      if (pedido !== dashboard.pedidoAtual || estado.telaAtual !== 'dashboard') return;
+      renderizarDashboard(dados);
+    })
+    .catch(function(erro) {
+      if (pedido !== dashboard.pedidoAtual) return;
+      falhaAoAtualizar(conteudo, erro, carregarDashboard, !!guardado);
+    });
+}
+
+function renderizarDashboard(d) {
+  const conteudo = $('dashboardConteudo');
+  conteudo.innerHTML = '';
+
+  // Período (uma linha de filtros acima dos gráficos)
+  const ferramentas = el('div', 'ferramentas dashboard-ferramentas');
+  const abas = el('div', 'abas-relatorio');
+  abas.setAttribute('role', 'tablist');
+  Object.keys(d.periodos).forEach(function(chave) {
+    const botao = el('button', 'aba-relatorio' + (chave === d.periodo ? ' ativa' : ''), d.periodos[chave]);
+    botao.type = 'button';
+    botao.setAttribute('role', 'tab');
+    botao.setAttribute('aria-selected', chave === d.periodo ? 'true' : 'false');
+    botao.addEventListener('click', function() {
+      if (dashboard.periodo === chave) return;
+      dashboard.periodo = chave;
+      carregarDashboard();
+    });
+    abas.appendChild(botao);
+  });
+  ferramentas.appendChild(abas);
+  ferramentas.appendChild(el('span', 'dashboard-periodo', textoPeriodo(d.inicio, d.fim)));
+  conteudo.appendChild(ferramentas);
+
+  // Números principais
+  const indicadores = el('div', 'grade-indicadores quatro');
+  indicadores.appendChild(criarIndicador({ icone: 'pedido', rotulo: 'Quentinhas', valor: numeroBR(d.totais.quentinhas),
+    detalhe: d.totais.dias ? d.totais.dias + (d.totais.dias === 1 ? ' dia com pedidos' : ' dias com pedidos') : 'nenhum pedido' }));
+  indicadores.appendChild(criarIndicador({ icone: 'cobranca', cor: 'azul', rotulo: 'Faturamento', valor: formatarMoeda(d.totais.valor),
+    detalhe: 'pedidos enviados e confirmados' }));
+  indicadores.appendChild(criarIndicador({ icone: 'preco', cor: 'amarelo', rotulo: 'Valor médio', valor: formatarMoeda(d.totais.ticket),
+    detalhe: 'por quentinha' }));
+  indicadores.appendChild(criarIndicador({ icone: 'empresa', rotulo: 'Pedidos', valor: numeroBR(d.totais.pedidos),
+    detalhe: 'de empresas e clientes' }));
+  conteudo.appendChild(indicadores);
+
+  if (!d.totais.quentinhas) {
+    conteudo.appendChild(estadoVazio({
+      icone: 'pizza',
+      titulo: 'Nenhum pedido neste período',
+      texto: 'Escolha outro período acima para ver os gráficos.'
+    }));
+    preencherIcones(conteudo);
+    return;
+  }
+
+  const grade = el('div', 'grade-graficos');
+  grade.appendChild(criarCartaoPizza({
+    titulo: 'Quentinhas por empresa',
+    subtitulo: numeroBR(d.totais.quentinhas) + ' quentinhas no período',
+    fatias: d.quentinhas_por_empresa,
+    formatar: function(v) { return numeroBR(v) + (v === 1 ? ' quentinha' : ' quentinhas'); }
+  }));
+  grade.appendChild(criarCartaoPizza({
+    titulo: 'Faturamento por empresa',
+    subtitulo: formatarMoeda(d.totais.valor) + ' no período',
+    fatias: d.faturamento_por_empresa,
+    formatar: formatarMoeda
+  }));
+  grade.appendChild(criarCartaoPizza({
+    titulo: 'Pratos mais pedidos',
+    subtitulo: 'Proteína escolhida em cada quentinha',
+    fatias: d.proteinas,
+    formatar: function(v) { return numeroBR(v) + (v === 1 ? ' quentinha' : ' quentinhas'); }
+  }));
+  if (d.situacao && d.situacao.length) {
+    const totalSituacao = d.situacao.reduce(function(s, x) { return s + x.valor; }, 0);
+    grade.appendChild(criarCartaoPizza({
+      titulo: 'Situação do dinheiro',
+      subtitulo: 'O que já entrou e o que falta dos pedidos de empresas (' + formatarMoeda(totalSituacao) + ')',
+      fatias: d.situacao,
+      cores: d.situacao.map(function(x) { return CORES_SITUACAO[x.chave]; }),
+      formatar: formatarMoeda
+    }));
+  }
+  conteudo.appendChild(grade);
+
+  preencherIcones(conteudo);
+}
+
+function numeroBR(n) {
+  return Number(n || 0).toLocaleString('pt-BR');
+}
+
+// ----------------------------------------------------------------
+// CARTÃO COM GRÁFICO DE PIZZA + LEGENDA
+// opcoes = { titulo, subtitulo, fatias: [{ nome, valor, outras? }], cores?, formatar }
+// ----------------------------------------------------------------
+function criarCartaoPizza(opcoes) {
+  const cartao = el('div', 'cartao cartao-grafico');
+  cartao.appendChild(el('h3', '', opcoes.titulo));
+  if (opcoes.subtitulo) cartao.appendChild(el('p', 'texto-apoio', opcoes.subtitulo));
+
+  const total = opcoes.fatias.reduce(function(s, f) { return s + f.valor; }, 0);
+  const cores = opcoes.fatias.map(function(f, i) {
+    if (opcoes.cores && opcoes.cores[i]) return opcoes.cores[i];
+    return f.outras ? 'var(--serie-outras)' : 'var(--serie-' + (i + 1) + ')';
+  });
+
+  const corpo = el('div', 'grafico-corpo');
+  const desenho = el('div', 'pizza');
+  const dica = el('div', 'pizza-dica');
+  dica.hidden = true;
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '-1.04 -1.04 2.08 2.08');
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', opcoes.titulo + ': ' + opcoes.fatias.map(function(f) {
+    return f.nome + ' ' + porcentagem(f.valor, total);
+  }).join(', '));
+
+  const legenda = el('ul', 'legenda-grafico');
+  const fatiasSvg = [];
+  const linhas = [];
+  const acoesFatias = [];
+
+  let angulo = -Math.PI / 2;   // começa no topo, sentido horário
+  opcoes.fatias.forEach(function(f, i) {
+    const fracao = total ? f.valor / total : 0;
+    const fim = angulo + fracao * Math.PI * 2;
+
+    let forma;
+    if (fracao >= 0.9999) {
+      forma = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      forma.setAttribute('r', '1');
+    } else {
+      // Dois arcos (até o meio e do meio ao fim): um arco único de
+      // meia volta exata é desenhado, mas não "sente" o mouse
+      forma = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      const meio = (angulo + fim) / 2;
+      const ponto = function(a) { return Math.cos(a).toFixed(4) + ' ' + Math.sin(a).toFixed(4); };
+      forma.setAttribute('d', 'M0 0 L' + ponto(angulo) + ' A1 1 0 0 1 ' + ponto(meio) + ' A1 1 0 0 1 ' + ponto(fim) + ' Z');
+    }
+    forma.setAttribute('class', 'fatia');
+    forma.style.fill = cores[i];
+    svg.appendChild(forma);
+    fatiasSvg.push(forma);
+    angulo = fim;
+
+    // Legenda: cor + nome + valor + porcentagem
+    const linha = el('li');
+    const marca = el('span', 'legenda-cor');
+    marca.style.background = cores[i];
+    linha.appendChild(marca);
+    linha.appendChild(el('span', 'legenda-nome', f.nome));
+    const numeros = el('span', 'legenda-numeros');
+    numeros.appendChild(el('strong', '', porcentagem(f.valor, total)));
+    numeros.appendChild(el('span', '', opcoes.formatar(f.valor)));
+    linha.appendChild(numeros);
+    legenda.appendChild(linha);
+    linhas.push(linha);
+
+    // Passar o mouse (ou tocar) na fatia ou na linha destaca as duas
+    function destacar(evento) {
+      fatiasSvg.forEach(function(outra, j) { outra.classList.toggle('apagada', j !== i); });
+      linhas.forEach(function(outra, j) { outra.classList.toggle('ativa', j === i); });
+      dica.innerHTML = '';
+      dica.appendChild(el('strong', '', f.nome));
+      dica.appendChild(el('span', '', opcoes.formatar(f.valor) + ' · ' + porcentagem(f.valor, total)));
+      dica.hidden = false;
+      if (evento && evento.type !== 'focus') evento.stopPropagation();
+    }
+    function limpar() {
+      fatiasSvg.forEach(function(outra) { outra.classList.remove('apagada'); });
+      linhas.forEach(function(outra) { outra.classList.remove('ativa'); });
+      dica.hidden = true;
+    }
+    linha.addEventListener('mouseenter', destacar);
+    linha.addEventListener('mouseleave', limpar);
+    linha.addEventListener('click', destacar);
+    acoesFatias.push({ inicio: angulo - fracao * Math.PI * 2, fim: angulo, destacar: destacar, limpar: limpar });
+  });
+
+  // Mouse ou dedo sobre a pizza: descobre a fatia pelo ângulo a partir do centro
+  function fatiaNoPonto(evento) {
+    const r = svg.getBoundingClientRect();
+    const x = (evento.clientX - r.left) / r.width * 2.08 - 1.04;
+    const y = (evento.clientY - r.top) / r.height * 2.08 - 1.04;
+    if (x * x + y * y > 1.02) return null;
+    let a = Math.atan2(y, x);
+    if (a < -Math.PI / 2) a += Math.PI * 2;   // o desenho começa no topo (-90°)
+    return acoesFatias.find(function(f) { return a >= f.inicio && a <= f.fim; }) || null;
+  }
+  let fatiaAtual = null;
+  function aoMover(evento) {
+    const fatia = fatiaNoPonto(evento);
+    if (fatia === fatiaAtual) return;
+    fatiaAtual = fatia;
+    if (fatia) fatia.destacar(evento);
+    else if (acoesFatias.length) acoesFatias[0].limpar();
+  }
+  svg.addEventListener('pointermove', aoMover);
+  svg.addEventListener('pointerdown', aoMover);
+  svg.addEventListener('pointerleave', function() {
+    fatiaAtual = null;
+    if (acoesFatias.length) acoesFatias[0].limpar();
+  });
+
+  desenho.appendChild(svg);
+  desenho.appendChild(dica);
+  corpo.appendChild(desenho);
+  corpo.appendChild(legenda);
+  cartao.appendChild(corpo);
+  return cartao;
+}
+
+function porcentagem(valor, total) {
+  if (!total) return '0%';
+  const p = valor / total * 100;
+  if (p > 0 && p < 1) return '<1%';
+  return Math.round(p).toLocaleString('pt-BR') + '%';
+}
+</script>

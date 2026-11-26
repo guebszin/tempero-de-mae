@@ -1,0 +1,17 @@
+{
+  "name": "tempero-de-mae",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tempero de Mãe - sistema de gestão de quentinhas (Google Apps Script + Google Sheets)",
+  "scripts": {
+    "login": "clasp login",
+    "baixar": "clasp pull",
+    "enviar": "clasp push --force",
+    "versao": "clasp version",
+    "publicar": "clasp push --force && clasp deploy --deploymentId AKfycbzjFyTv6So_5jGqcm1yUgIzOG_3Z1fg2RgHpFeXkmjxSgXUWXMlPXIz-bwW3-jAkNO0zQ --description",
+    "testes": "cd testes && bash rodar_todos.sh"
+  },
+  "devDependencies": {
+    "@google/clasp": "^2.4.2"
+  }
+}

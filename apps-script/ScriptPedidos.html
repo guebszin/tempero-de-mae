@@ -1,0 +1,2239 @@
+<script>
+// ================================================================
+// SCRIPTPEDIDOS.html — pedido do dia
+// Empresa: monta e envia o pedido de hoje (até o horário limite).
+// Restaurante: acompanha, confirma/recusa, vê a lista de produção,
+// registra pedidos de clientes não cadastrados e imprime para a cozinha.
+// Ao vivo: os pedidos aparecem sozinhos, sem atualizar a página.
+// ================================================================
+
+const SITUACOES_PEDIDO = {
+  ENVIADO: { texto: 'Aguardando confirmação', cor: 'amarela' },
+  CONFIRMADO: { texto: 'Confirmado', cor: 'verde' },
+  RECUSADO: { texto: 'Recusado', cor: 'vermelha' },
+  CANCELADO: { texto: 'Cancelado', cor: 'cinza' }
+};
+
+function etiquetaPedido(status) {
+  const situacao = SITUACOES_PEDIDO[status] || { texto: status, cor: 'cinza' };
+  return criarEtiqueta(situacao.texto, situacao.cor);
+}
+
+function horaDe(ms) {
+  if (!ms) return '';
+  const data = new Date(ms);
+  return String(data.getHours()).padStart(2, '0') + ':' + String(data.getMinutes()).padStart(2, '0');
+}
+
+function nomeDoDiaCompleto(texto) {
+  const data = textoParaData(texto);
+  return NOMES_DIAS_LONGOS[data.getDay()] + ', ' + formatarData(texto).slice(0, 5);
+}
+
+// Quanto tempo falta até o horário limite (usa o relógio do servidor)
+function tempoRestante(prazo, recebidoEm) {
+  if (!prazo || !prazo.aberto) return '';
+  const partes = prazo.limite.split(':').map(Number);
+  const agoraServidor = prazo.agora_ms + (Date.now() - recebidoEm);
+  const limite = new Date(agoraServidor);
+  limite.setHours(partes[0], partes[1], 0, 0);
+  const minutos = Math.floor((limite.getTime() - agoraServidor) / 60000);
+  if (minutos <= 0) return 'encerrando agora';
+  if (minutos < 60) return 'faltam ' + minutos + ' min';
+  return 'faltam ' + Math.floor(minutos / 60) + 'h ' + String(minutos % 60).padStart(2, '0') + 'min';
+}
+
+// Grupo de botões de escolha única (proteína, opção extra)
+function criarEscolha(opcoes, valorAtual, aoEscolher, desativado) {
+  const grupo = el('div', 'escolhas');
+
+  opcoes.forEach(function(opcao) {
+    const botao = el('button', 'escolha' + (opcao.valor === valorAtual ? ' marcada' : ''), opcao.texto);
+    botao.type = 'button';
+    botao.disabled = !!desativado;
+    botao.setAttribute('aria-pressed', opcao.valor === valorAtual ? 'true' : 'false');
+    botao.addEventListener('click', function() { aoEscolher(opcao.valor); });
+    grupo.appendChild(botao);
+  });
+
+  return grupo;
+}
+
+// ================================================================
+// EMPRESA: PEDIDO DE HOJE
+// ================================================================
+const pedidoEmpresa = {
+  estado: null,
+  recebidoEm: 0,
+  selecao: {},        // { funcionario_id: { proteina, opcao_extra, itens_removidos, observacao } }
+  avulsas: [],        // [{ chave, nome, proteina, opcao_extra }]
+  observacoes: '',
+  busca: '',
+  alterado: false,
+  faltando: {}        // pessoas sem proteína (destacadas depois de tentar enviar)
+};
+
+let proximaChaveAvulsa = 1;
+
+TELAS['pedidos-empresa'] = {
+  carregar: function() { carregarPedidoEmpresa(); }
+};
+
+// Ao sair: apaga o pedido em memória e para os avisos ao vivo
+AO_SAIR.push(function() {
+  pedidoEmpresa.estado = null;
+  pedidoEmpresa.recebidoEm = 0;
+  pedidoEmpresa.selecao = {};
+  pedidoEmpresa.avulsas = [];
+  pedidoEmpresa.observacoes = '';
+  pedidoEmpresa.busca = '';
+  pedidoEmpresa.alterado = false;
+  pedidoEmpresa.faltando = {};
+  pedidosAdmin.data = null;
+  pedidosAdmin.dias = {};
+  clearInterval(aoVivo.temporizador);
+  aoVivo.versao = null;
+  aoVivo.pedidos = null;
+  aoVivo.pedidoEmpresa = null;
+  aoVivo.ocupado = false;
+});
+
+window.addEventListener('beforeunload', function(evento) {
+  if (pedidoEmpresa.alterado) {
+    evento.preventDefault();
+    evento.returnValue = '';
+  }
+});
+
+function carregarPedidoEmpresa() {
+  const conteudo = $('pedidoEmpresaConteudo');
+
+  if (pedidoEmpresa.estado && pedidoEmpresa.alterado) {
+    renderizarPedidoEmpresa();
+    return;
+  }
+
+  if (!pedidoEmpresa.estado) mostrarCarregandoLista(conteudo, 4);
+
+  apiSessao('obterPedidoEmpresa')
+    .then(function(estadoServidor) {
+      aplicarEstadoPedidoEmpresa(estadoServidor);
+      if (estado.telaAtual === 'pedidos-empresa') renderizarPedidoEmpresa();
+    })
+    .catch(function(erro) {
+      falhaAoAtualizar(conteudo, erro, carregarPedidoEmpresa, !!pedidoEmpresa.estado);
+    });
+}
+
+// Copia o pedido salvo para a seleção da tela
+function aplicarEstadoPedidoEmpresa(estadoServidor) {
+  pedidoEmpresa.estado = estadoServidor;
+  pedidoEmpresa.recebidoEm = Date.now();
+  pedidoEmpresa.selecao = {};
+  pedidoEmpresa.avulsas = [];
+  pedidoEmpresa.faltando = {};
+  pedidoEmpresa.alterado = false;
+  pedidoEmpresa.observacoes = estadoServidor.pedido ? estadoServidor.pedido.observacoes : '';
+
+  if (estadoServidor.pedido && estadoServidor.pedido.status !== 'CANCELADO') {
+    estadoServidor.pedido.itens.forEach(function(item) {
+      if (item.avulsa) {
+        pedidoEmpresa.avulsas.push({
+          chave: proximaChaveAvulsa++,
+          nome: item.nome,
+          proteina: item.padrao ? '' : item.proteina,
+          opcao_extra: item.opcao_extra
+        });
+      } else {
+        pedidoEmpresa.selecao[item.funcionario_id] = {
+          proteina: item.padrao ? '' : item.proteina,
+          opcao_extra: item.opcao_extra,
+          itens_removidos: item.itens_removidos.slice(),
+          observacao: item.observacao
+        };
+      }
+    });
+  }
+
+  if (typeof resumoEmpresa !== 'undefined') resumoEmpresa = null;
+}
+
+function podeEditarPedido() {
+  const e = pedidoEmpresa.estado;
+  return !!(e && e.prazo.aberto && e.cardapio && e.tem_preco);
+}
+
+// Quem escolhe a proteína (conforme a configuração da empresa)
+function funcionarioEscolhe(funcionarioId) {
+  const f = pedidoEmpresa.estado.funcionarios.find(function(x) { return x.funcionario_id === funcionarioId; });
+  return !!(f && f.escolhe);
+}
+
+function alguemEscolhe() {
+  const e = pedidoEmpresa.estado;
+  return e.funcionarios.some(function(f) { return f.escolhe; }) || (e.config.avulsas && e.config.avulsa_escolhe);
+}
+
+function criarQuentinhaDoDia() {
+  const caixa = el('div', 'quentinha-do-dia');
+  caixa.innerHTML = icone('cardapio');
+  caixa.appendChild(el('span', '', 'Quentinha do dia'));
+  return caixa;
+}
+
+// O proprietário mudou a configuração: refaz a tela do pedido, se nada foi alterado
+AO_MUDAR_RECURSOS.push(function() {
+  if (estado.telaAtual === 'pedidos-empresa' && !pedidoEmpresa.alterado) carregarPedidoEmpresa();
+  if (estado.telaAtual === 'inicio-empresa' && typeof carregarInicioEmpresa === 'function') carregarInicioEmpresa();
+});
+
+function marcarPedidoAlterado() {
+  pedidoEmpresa.alterado = true;
+  atualizarBarraPedido();
+}
+
+function quantidadeSelecionada() {
+  return Object.keys(pedidoEmpresa.selecao).length + pedidoEmpresa.avulsas.length;
+}
+
+// ---------- TELA ----------
+function renderizarPedidoEmpresa() {
+  const e = pedidoEmpresa.estado;
+  const conteudo = $('pedidoEmpresaConteudo');
+  conteudo.innerHTML = '';
+
+  conteudo.appendChild(criarCabecalhoPedidoEmpresa());
+
+  // Sem cardápio ou sem preço: não dá para pedir
+  if (!e.cardapio) {
+    conteudo.appendChild(estadoVazio({
+      icone: 'cardapio',
+      titulo: 'Sem cardápio para hoje',
+      texto: e.prazo.motivo && !e.prazo.aberto
+        ? e.prazo.motivo
+        : 'O restaurante ainda não publicou o cardápio de hoje. Assim que ele publicar, você poderá fazer o pedido.'
+    }));
+    return;
+  }
+
+  if (!e.tem_preco && !e.pedido) {
+    conteudo.appendChild(criarAlerta(e.config.mostrar_precos
+      ? 'O restaurante ainda não definiu o valor da quentinha da sua empresa. Entre em contato com ele.'
+      : 'O restaurante ainda não liberou os pedidos da sua empresa. Entre em contato com ele.'));
+    return;
+  }
+
+  if (!podeEditarPedido() && !e.pedido) {
+    conteudo.appendChild(estadoVazio({
+      icone: 'pedido',
+      titulo: 'Nenhum pedido hoje',
+      texto: e.prazo.motivo || 'Os pedidos de hoje estão encerrados.'
+    }));
+    return;
+  }
+
+  conteudo.appendChild(criarResumoCardapioHoje());
+
+  if (podeEditarPedido()) conteudo.appendChild(criarFerramentasPedido());
+
+  const lista = el('div', 'lista-pedido');
+  lista.id = 'listaPessoasPedido';
+  conteudo.appendChild(lista);
+  renderizarPessoasPedido();
+
+  if (e.config.avulsas || pedidoEmpresa.avulsas.length) conteudo.appendChild(criarSecaoAvulsas());
+  conteudo.appendChild(criarObservacaoPedido());
+
+  const barra = el('div', 'barra-pedido');
+  barra.id = 'barraPedido';
+  conteudo.appendChild(barra);
+  atualizarBarraPedido();
+}
+
+function criarCabecalhoPedidoEmpresa() {
+  const e = pedidoEmpresa.estado;
+  const cartao = el('div', 'cartao cabecalho-pedido');
+
+  const linha = el('div', 'cabecalho-pedido-linha');
+  const textos = el('div');
+  textos.appendChild(el('h2', '', 'Pedido de ' + nomeDoDiaCompleto(e.prazo.hoje).toLowerCase()));
+
+  const prazo = el('p', 'subtitulo-cartao');
+  if (e.prazo.aberto) {
+    prazo.textContent = 'Você pode enviar ou alterar até ' + e.prazo.limite + ' (' +
+      tempoRestante(e.prazo, pedidoEmpresa.recebidoEm) + ').';
+  } else {
+    prazo.textContent = e.prazo.motivo;
+  }
+  textos.appendChild(prazo);
+  linha.appendChild(textos);
+
+  if (e.pedido) {
+    linha.appendChild(etiquetaPedido(e.pedido.status));
+  } else if (podeEditarPedido()) {
+    linha.appendChild(criarEtiqueta('Ainda não enviado', 'cinza'));
+  }
+
+  cartao.appendChild(linha);
+
+  if (e.pedido && e.pedido.status === 'RECUSADO') {
+    const motivo = (e.pedido.resposta_restaurante || 'sem motivo informado').replace(/[.!?]*$/, '.');
+    cartao.appendChild(criarAlerta('O restaurante recusou o pedido: ' + motivo +
+      (e.prazo.aberto ? ' Você pode ajustar e enviar de novo.' : ''), { icone: 'alerta' }));
+  } else if (e.pedido && e.pedido.alterado_apos_confirmacao) {
+    cartao.appendChild(criarAlerta('Você alterou o pedido depois da confirmação. O restaurante vai confirmar de novo.', { tipo: 'info', icone: 'pedido' }));
+  } else if (e.pedido && e.pedido.status === 'CONFIRMADO') {
+    cartao.appendChild(criarAlerta('Pedido confirmado pelo restaurante às ' + horaDe(e.pedido.confirmado_em) + '.', { tipo: 'ok', icone: 'check' }));
+  }
+
+  return cartao;
+}
+
+function criarResumoCardapioHoje() {
+  const e = pedidoEmpresa.estado;
+  const caixa = el('div', 'resumo-cardapio-hoje');
+
+  caixa.appendChild(el('strong', '', 'Hoje: '));
+  caixa.appendChild(document.createTextNode(e.cardapio.proteinas.join(' ou ') || 'quentinha do dia'));
+
+  const acompanha = e.cardapio.acompanhamentos.concat(e.cardapio.saladas, e.cardapio.guarnicoes);
+  if (acompanha.length) {
+    caixa.appendChild(el('span', 'resumo-cardapio-detalhe', ' · acompanha ' + acompanha.join(', ')));
+  }
+
+  if (e.preco_unitario !== null) {
+    caixa.appendChild(el('span', 'resumo-cardapio-detalhe', ' · ' + formatarMoeda(e.preco_unitario) + ' cada'));
+  }
+
+  return caixa;
+}
+
+// ---------- FERRAMENTAS (busca e atalhos) ----------
+function criarFerramentasPedido() {
+  const e = pedidoEmpresa.estado;
+  const caixa = el('div', 'ferramentas');
+
+  const busca = el('div', 'campo-busca');
+  busca.innerHTML = icone('busca');
+  const campo = el('input');
+  campo.type = 'search';
+  campo.placeholder = 'Buscar funcionário';
+  campo.value = pedidoEmpresa.busca;
+  campo.addEventListener('input', function() {
+    pedidoEmpresa.busca = campo.value;
+    renderizarPessoasPedido();
+  });
+  busca.appendChild(campo);
+  caixa.appendChild(busca);
+
+  caixa.appendChild(criarBotao('Marcar todos', {
+    classe: 'botao-secundario',
+    aoClicar: function() {
+      e.funcionarios.forEach(function(f) {
+        if (!pedidoEmpresa.selecao[f.funcionario_id]) pedidoEmpresa.selecao[f.funcionario_id] = novaEscolha(f.escolhe);
+      });
+      marcarPedidoAlterado();
+      renderizarPessoasPedido();
+    }
+  }));
+
+  if (e.ultimo_pedido && e.ultimo_pedido.funcionarios.length) {
+    caixa.appendChild(criarBotao('Repetir quem pediu em ' + formatarData(e.ultimo_pedido.data_entrega).slice(0, 5), {
+      classe: 'botao-secundario',
+      aoClicar: function() {
+        const ativos = {};
+        e.funcionarios.forEach(function(f) { ativos[f.funcionario_id] = true; });
+        pedidoEmpresa.selecao = {};
+        e.ultimo_pedido.funcionarios.forEach(function(id) {
+          if (ativos[id]) pedidoEmpresa.selecao[id] = novaEscolha(funcionarioEscolhe(id));
+        });
+        marcarPedidoAlterado();
+        renderizarPessoasPedido();
+        avisar(alguemEscolhe()
+          ? 'Marcamos quem pediu no último dia. Agora é só escolher as proteínas.'
+          : 'Marcamos quem pediu no último dia.');
+      }
+    }));
+  }
+
+  if (e.cardapio.proteinas.length > 1 && alguemEscolhe()) {
+    const todos = el('div', 'proteina-para-todos');
+    todos.appendChild(el('span', '', 'Proteína para quem ainda não escolheu:'));
+    todos.appendChild(criarEscolha(
+      e.cardapio.proteinas.map(function(p) { return { valor: p, texto: p }; }),
+      null,
+      function(proteina) {
+        let alterados = 0;
+        Object.keys(pedidoEmpresa.selecao).forEach(function(id) {
+          if (funcionarioEscolhe(id) && !pedidoEmpresa.selecao[id].proteina) {
+            pedidoEmpresa.selecao[id].proteina = proteina;
+            alterados++;
+          }
+        });
+        if (e.config.avulsa_escolhe) {
+          pedidoEmpresa.avulsas.forEach(function(a) {
+            if (!a.proteina) { a.proteina = proteina; alterados++; }
+          });
+        }
+        if (!alterados) {
+          avisar('Todos os marcados já têm proteína escolhida.', 'erro');
+          return;
+        }
+        pedidoEmpresa.faltando = {};
+        marcarPedidoAlterado();
+        renderizarPessoasPedido();
+        renderizarAvulsas();
+      }
+    ));
+    caixa.appendChild(todos);
+  }
+
+  return caixa;
+}
+
+function novaEscolha(escolhe) {
+  const e = pedidoEmpresa.estado;
+  return {
+    proteina: escolhe !== false && e.cardapio.proteinas.length === 1 ? e.cardapio.proteinas[0] : '',
+    opcao_extra: '',
+    itens_removidos: [],
+    observacao: ''
+  };
+}
+
+// ---------- LISTA DE FUNCIONÁRIOS ----------
+function renderizarPessoasPedido() {
+  const lista = document.getElementById('listaPessoasPedido');
+  if (!lista) return;
+
+  const e = pedidoEmpresa.estado;
+  const editavel = podeEditarPedido();
+  const termo = normalizarBusca(pedidoEmpresa.busca);
+  lista.innerHTML = '';
+
+  // Fora do prazo, mostra só quem está no pedido
+  let pessoas = e.funcionarios.filter(function(f) {
+    if (!editavel && !pedidoEmpresa.selecao[f.funcionario_id]) return false;
+    if (!termo) return true;
+    return normalizarBusca(f.nome + ' ' + f.setor + ' ' + f.matricula).indexOf(termo) !== -1;
+  });
+
+  if (!e.funcionarios.length) {
+    lista.appendChild(estadoVazio({
+      icone: 'pessoas',
+      titulo: 'Nenhum funcionário cadastrado',
+      texto: 'O restaurante ainda não cadastrou os funcionários da sua empresa. Você pode usar as quentinhas avulsas abaixo.'
+    }));
+    return;
+  }
+
+  if (!pessoas.length) {
+    lista.appendChild(el('div', 'contador', termo ? 'Nenhum funcionário encontrado.' : 'Nenhum funcionário no pedido.'));
+    return;
+  }
+
+  pessoas.forEach(function(f) { lista.appendChild(criarLinhaPessoa(f)); });
+}
+
+function criarLinhaPessoa(funcionario) {
+  const e = pedidoEmpresa.estado;
+  const editavel = podeEditarPedido();
+  const escolha = pedidoEmpresa.selecao[funcionario.funcionario_id];
+  const id = funcionario.funcionario_id;
+
+  const linha = el('div', 'pessoa-pedido' + (escolha ? ' marcada' : '') + (pedidoEmpresa.faltando[id] ? ' faltando' : ''));
+  linha.dataset.funcionario = id;
+
+  // Marcar / desmarcar
+  const topo = el('label', 'pessoa-topo');
+  const marcar = el('input');
+  marcar.type = 'checkbox';
+  marcar.checked = !!escolha;
+  marcar.disabled = !editavel;
+  marcar.addEventListener('change', function() {
+    if (marcar.checked) {
+      pedidoEmpresa.selecao[id] = novaEscolha(funcionario.escolhe);
+    } else {
+      delete pedidoEmpresa.selecao[id];
+      delete pedidoEmpresa.faltando[id];
+    }
+    marcarPedidoAlterado();
+    atualizarLinhaPessoa(funcionario);
+  });
+  topo.appendChild(marcar);
+
+  const nome = el('div', 'pessoa-nome');
+  nome.appendChild(el('strong', '', funcionario.nome));
+  if (funcionario.setor) nome.appendChild(el('span', '', funcionario.setor));
+  topo.appendChild(nome);
+
+  if (funcionario.personaliza) topo.appendChild(criarEtiqueta('Personaliza', 'azul'));
+  else if (funcionario.escolhe && e.config.escolha !== 'TODOS') topo.appendChild(criarEtiqueta('Escolhe', 'azul'));
+  linha.appendChild(topo);
+
+  if (!escolha) return linha;
+
+  // Escolhas da quentinha
+  const detalhes = el('div', 'pessoa-detalhes');
+
+  // Quem não escolhe recebe a quentinha do dia
+  if (!funcionario.escolhe) {
+    detalhes.appendChild(criarQuentinhaDoDia());
+    linha.appendChild(detalhes);
+    return linha;
+  }
+
+  detalhes.appendChild(criarEscolha(
+    e.cardapio.proteinas.map(function(p) { return { valor: p, texto: p }; }),
+    escolha.proteina,
+    function(proteina) {
+      escolha.proteina = proteina;
+      delete pedidoEmpresa.faltando[id];
+      marcarPedidoAlterado();
+      atualizarLinhaPessoa(funcionario);
+    },
+    !editavel
+  ));
+
+  if (e.opcoes_extra.length) {
+    const opcoesExtra = [{ valor: '', texto: 'Sem extra' }].concat(
+      e.opcoes_extra.map(function(o) { return { valor: o, texto: o }; })
+    );
+    const extra = criarEscolha(opcoesExtra, escolha.opcao_extra || '', function(valor) {
+      escolha.opcao_extra = valor;
+      marcarPedidoAlterado();
+      atualizarLinhaPessoa(funcionario);
+    }, !editavel);
+    extra.classList.add('extras');
+    detalhes.appendChild(extra);
+  }
+
+  // Personalização (só para quem tem permissão)
+  if (funcionario.personaliza) {
+    const personalizacao = el('div', 'personalizacao');
+    const resumo = [];
+    if (escolha.itens_removidos.length) resumo.push('Sem ' + escolha.itens_removidos.join(', ').toLowerCase());
+    if (escolha.observacao) resumo.push('Obs.: ' + escolha.observacao);
+
+    personalizacao.appendChild(el('span', '', resumo.length ? resumo.join(' · ') : 'Sem personalização'));
+
+    if (editavel) {
+      personalizacao.appendChild(criarBotao('Personalizar', {
+        classe: 'botao-fantasma botao-pequeno', icone: 'editar',
+        aoClicar: function() { abrirPersonalizacao(funcionario); }
+      }));
+    }
+
+    detalhes.appendChild(personalizacao);
+  }
+
+  linha.appendChild(detalhes);
+  return linha;
+}
+
+function atualizarLinhaPessoa(funcionario) {
+  const lista = document.getElementById('listaPessoasPedido');
+  const antiga = lista.querySelector('[data-funcionario="' + funcionario.funcionario_id + '"]');
+  if (antiga) lista.replaceChild(criarLinhaPessoa(funcionario), antiga);
+}
+
+// Janela para remover itens e escrever observação
+function abrirPersonalizacao(funcionario) {
+  const e = pedidoEmpresa.estado;
+  const escolha = pedidoEmpresa.selecao[funcionario.funcionario_id];
+  const form = el('form');
+  form.noValidate = true;
+
+  form.appendChild(el('p', 'texto-apoio', 'Desmarque o que ' + primeiroNome(funcionario.nome) + ' não quer na quentinha.'));
+
+  const grupos = [
+    { titulo: 'Acompanhamento', itens: e.cardapio.acompanhamentos },
+    { titulo: 'Salada', itens: e.cardapio.saladas },
+    { titulo: 'Guarnição', itens: e.cardapio.guarnicoes }
+  ];
+
+  const marcadores = [];
+
+  grupos.forEach(function(grupo) {
+    if (!grupo.itens.length) return;
+    form.appendChild(el('div', 'grupo-titulo', grupo.titulo));
+    const caixa = el('div', 'itens-personalizar');
+
+    grupo.itens.forEach(function(item) {
+      const rotulo = el('label', 'item-personalizar');
+      const marcar = el('input');
+      marcar.type = 'checkbox';
+      marcar.checked = escolha.itens_removidos.indexOf(item) === -1;
+      marcar.dataset.item = item;
+      marcadores.push(marcar);
+      rotulo.appendChild(marcar);
+      rotulo.appendChild(el('span', '', item));
+      caixa.appendChild(rotulo);
+    });
+
+    form.appendChild(caixa);
+  });
+
+  const campo = el('div', 'campo');
+  campo.appendChild(el('label', '', 'Observação (opcional)'));
+  const observacao = el('textarea');
+  observacao.maxLength = 200;
+  observacao.placeholder = 'Ex.: pouco sal, mais arroz';
+  observacao.value = escolha.observacao || '';
+  campo.appendChild(observacao);
+  form.appendChild(campo);
+
+  const rodape = el('div', 'modal-rodape');
+  rodape.appendChild(criarBotao('Cancelar', { classe: 'botao-secundario', aoClicar: fecharModal }));
+  const salvar = criarBotao('Aplicar', { classe: 'botao-primario' });
+  salvar.type = 'submit';
+  rodape.appendChild(salvar);
+  form.appendChild(rodape);
+
+  form.addEventListener('submit', function(evento) {
+    evento.preventDefault();
+    escolha.itens_removidos = marcadores.filter(function(m) { return !m.checked; }).map(function(m) { return m.dataset.item; });
+    escolha.observacao = observacao.value.trim();
+    fecharModal();
+    marcarPedidoAlterado();
+    atualizarLinhaPessoa(funcionario);
+  });
+
+  abrirModal('Personalizar a quentinha de ' + primeiroNome(funcionario.nome), form, { pequeno: true });
+}
+
+// ---------- AVULSAS ----------
+function criarSecaoAvulsas() {
+  const secao = el('div', 'secao-avulsas');
+  secao.id = 'secaoAvulsas';
+  renderizarAvulsas(secao);
+  return secao;
+}
+
+function renderizarAvulsas(secao) {
+  secao = secao || document.getElementById('secaoAvulsas');
+  if (!secao) return;
+
+  const e = pedidoEmpresa.estado;
+  const editavel = podeEditarPedido();
+  secao.innerHTML = '';
+
+  if (!editavel && !pedidoEmpresa.avulsas.length) return;
+
+  const titulo = el('div', 'secao-avulsas-topo');
+  titulo.appendChild(el('h3', '', 'Quentinhas avulsas'));
+  titulo.appendChild(el('span', 'contador', 'Para visitantes ou quem não está cadastrado.'));
+  secao.appendChild(titulo);
+
+  pedidoEmpresa.avulsas.forEach(function(avulsa) {
+    const linha = el('div', 'pessoa-pedido marcada avulsa' + (pedidoEmpresa.faltando['avulsa-' + avulsa.chave] ? ' faltando' : ''));
+
+    const topo = el('div', 'pessoa-topo');
+    const nome = el('input', 'campo-item');
+    nome.placeholder = 'Nome (ex.: Visitante – João)';
+    nome.maxLength = 80;
+    nome.value = avulsa.nome;
+    nome.disabled = !editavel;
+    nome.addEventListener('input', function() {
+      avulsa.nome = nome.value;
+      marcarPedidoAlterado();
+    });
+    topo.appendChild(nome);
+
+    if (editavel) {
+      const remover = el('button', 'botao-icone pequeno');
+      remover.type = 'button';
+      remover.title = 'Remover avulsa';
+      remover.innerHTML = icone('fechar');
+      remover.addEventListener('click', function() {
+        pedidoEmpresa.avulsas = pedidoEmpresa.avulsas.filter(function(a) { return a !== avulsa; });
+        marcarPedidoAlterado();
+        renderizarAvulsas();
+      });
+      topo.appendChild(remover);
+    }
+
+    linha.appendChild(topo);
+
+    const detalhes = el('div', 'pessoa-detalhes');
+
+    if (!e.config.avulsa_escolhe) {
+      detalhes.appendChild(criarQuentinhaDoDia());
+      linha.appendChild(detalhes);
+      secao.appendChild(linha);
+      return;
+    }
+
+    detalhes.appendChild(criarEscolha(
+      e.cardapio.proteinas.map(function(p) { return { valor: p, texto: p }; }),
+      avulsa.proteina,
+      function(proteina) {
+        avulsa.proteina = proteina;
+        delete pedidoEmpresa.faltando['avulsa-' + avulsa.chave];
+        marcarPedidoAlterado();
+        renderizarAvulsas();
+      },
+      !editavel
+    ));
+
+    if (e.opcoes_extra.length) {
+      const extra = criarEscolha(
+        [{ valor: '', texto: 'Sem extra' }].concat(e.opcoes_extra.map(function(o) { return { valor: o, texto: o }; })),
+        avulsa.opcao_extra || '',
+        function(valor) {
+          avulsa.opcao_extra = valor;
+          marcarPedidoAlterado();
+          renderizarAvulsas();
+        },
+        !editavel
+      );
+      extra.classList.add('extras');
+      detalhes.appendChild(extra);
+    }
+
+    linha.appendChild(detalhes);
+    secao.appendChild(linha);
+  });
+
+  if (editavel && e.config.avulsas) {
+    secao.appendChild(criarBotao('Adicionar quentinha avulsa', {
+      classe: 'botao-secundario', icone: 'adicionar',
+      aoClicar: function() {
+        pedidoEmpresa.avulsas.push({
+          chave: proximaChaveAvulsa++,
+          nome: '',
+          proteina: e.config.avulsa_escolhe && e.cardapio.proteinas.length === 1 ? e.cardapio.proteinas[0] : '',
+          opcao_extra: ''
+        });
+        marcarPedidoAlterado();
+        renderizarAvulsas();
+        const campos = document.querySelectorAll('#secaoAvulsas input.campo-item');
+        if (campos.length) campos[campos.length - 1].focus();
+      }
+    }));
+  }
+}
+
+// ---------- OBSERVAÇÃO GERAL ----------
+function criarObservacaoPedido() {
+  const editavel = podeEditarPedido();
+  const campo = el('div', 'campo observacao-pedido');
+
+  if (!editavel && !pedidoEmpresa.observacoes) return campo;
+
+  campo.appendChild(el('label', '', 'Observação para o restaurante (opcional)'));
+  const texto = el('textarea');
+  texto.maxLength = 300;
+  texto.placeholder = 'Ex.: entregar na portaria B';
+  texto.value = pedidoEmpresa.observacoes;
+  texto.disabled = !editavel;
+  texto.addEventListener('input', function() {
+    pedidoEmpresa.observacoes = texto.value;
+    marcarPedidoAlterado();
+  });
+  campo.appendChild(texto);
+  return campo;
+}
+
+// ---------- BARRA DE ENVIO ----------
+function atualizarBarraPedido() {
+  const barra = document.getElementById('barraPedido');
+  if (!barra) return;
+
+  const e = pedidoEmpresa.estado;
+  const editavel = podeEditarPedido();
+  const quantidade = quantidadeSelecionada();
+  const preco = e.pedido && !editavel
+    ? (e.pedido.quantidade_total ? e.pedido.valor_total / e.pedido.quantidade_total : 0)
+    : (e.preco_unitario || 0);
+
+  barra.innerHTML = '';
+
+  const resumo = el('div', 'barra-pedido-resumo');
+  resumo.appendChild(el('strong', '', quantidade + (quantidade === 1 ? ' quentinha' : ' quentinhas')));
+  const partes = [];
+  if (e.config.mostrar_precos && e.preco_unitario !== null) partes.push(formatarMoeda(quantidade * preco));
+  if (pedidoEmpresa.alterado) partes.push('alterações não enviadas');
+  if (partes.length) resumo.appendChild(el('span', '', partes.join(' · ')));
+  barra.appendChild(resumo);
+
+  if (!editavel) return;
+
+  const acoes = el('div', 'barra-pedido-acoes');
+
+  if (e.pedido && e.pedido.status !== 'CANCELADO') {
+    acoes.appendChild(criarBotao('Cancelar pedido', {
+      classe: 'botao-fantasma botao-texto-perigo',
+      aoClicar: function(evento) { cancelarPedidoHoje(evento.currentTarget); }
+    }));
+  }
+
+  const enviar = criarBotao(e.pedido && e.pedido.status !== 'CANCELADO' ? 'Salvar alterações' : 'Enviar pedido', {
+    classe: 'botao-primario', icone: 'check',
+    aoClicar: function(evento) { enviarPedidoHoje(evento.currentTarget); }
+  });
+  enviar.disabled = !pedidoEmpresa.alterado && !!e.pedido && e.pedido.status !== 'RECUSADO' && e.pedido.status !== 'CANCELADO';
+  acoes.appendChild(enviar);
+
+  barra.appendChild(acoes);
+}
+
+function enviarPedidoHoje(botao) {
+  const e = pedidoEmpresa.estado;
+  const nomes = {};
+  e.funcionarios.forEach(function(f) { nomes[f.funcionario_id] = f.nome; });
+
+  // Confere antes de enviar: todos precisam de proteína
+  const faltando = {};
+  const nomesFaltando = [];
+
+  Object.keys(pedidoEmpresa.selecao).forEach(function(id) {
+    if (funcionarioEscolhe(id) && !pedidoEmpresa.selecao[id].proteina) {
+      faltando[id] = true;
+      nomesFaltando.push(nomes[id]);
+    }
+  });
+
+  pedidoEmpresa.avulsas.forEach(function(a) {
+    if ((e.config.avulsa_escolhe && !a.proteina) || a.nome.trim().length < 2) {
+      faltando['avulsa-' + a.chave] = true;
+      nomesFaltando.push(a.nome.trim() || 'avulsa sem nome');
+    }
+  });
+
+  pedidoEmpresa.faltando = faltando;
+
+  if (nomesFaltando.length) {
+    renderizarPessoasPedido();
+    renderizarAvulsas();
+    const primeiro = document.querySelector('.pessoa-pedido.faltando');
+    if (primeiro) primeiro.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    avisar((alguemEscolhe() ? 'Escolha a proteína (e o nome, nas avulsas) de: ' : 'Informe o nome das avulsas: ') + nomesFaltando.slice(0, 3).join(', ') +
+      (nomesFaltando.length > 3 ? ' e mais ' + (nomesFaltando.length - 3) : '') + '.', 'erro');
+    return;
+  }
+
+  if (!quantidadeSelecionada()) {
+    avisar('Marque pelo menos uma pessoa para enviar o pedido.', 'erro');
+    return;
+  }
+
+  const dados = {
+    observacoes: pedidoEmpresa.observacoes,
+    // versão do pedido que esta tela tinha (evita sobrescrever outra aba)
+    base_atualizado_em: e.pedido ? e.pedido.atualizado_em : null,
+    itens: Object.keys(pedidoEmpresa.selecao).map(function(id) {
+      const escolha = pedidoEmpresa.selecao[id];
+      return {
+        funcionario_id: id,
+        proteina: escolha.proteina,
+        opcao_extra: escolha.opcao_extra,
+        itens_removidos: escolha.itens_removidos,
+        observacao: escolha.observacao
+      };
+    }).concat(pedidoEmpresa.avulsas.map(function(a) {
+      return { funcionario_id: '', nome: a.nome.trim(), proteina: a.proteina, opcao_extra: a.opcao_extra };
+    }))
+  };
+
+  comCarregamento(botao, apiSessao('salvarPedidoEmpresa', dados))
+    .then(function(resposta) {
+      aplicarEstadoPedidoEmpresa(resposta.estado);
+      renderizarPedidoEmpresa();
+      avisar(resposta.mensagem);
+    })
+    .catch(function(erro) {
+      avisar(erro.message, 'erro');
+      if (/encerrad|passou|liberado|outra tela/.test(erro.message)) {
+        pedidoEmpresa.alterado = false;
+        carregarPedidoEmpresa();
+      }
+    });
+}
+
+function cancelarPedidoHoje(botao) {
+  confirmar({
+    titulo: 'Cancelar o pedido de hoje?',
+    mensagem: 'Nenhuma quentinha será preparada para a sua empresa hoje. Até ' + pedidoEmpresa.estado.prazo.limite +
+      ' você ainda pode fazer um novo pedido.',
+    textoBotao: 'Cancelar pedido',
+    textoCancelar: 'Voltar',
+    perigo: true
+  }).then(function(sim) {
+    if (!sim) return;
+
+    comCarregamento(botao, apiSessao('cancelarPedidoEmpresa'))
+      .then(function(resposta) {
+        aplicarEstadoPedidoEmpresa(resposta.estado);
+        renderizarPedidoEmpresa();
+        avisar(resposta.mensagem);
+      })
+      .catch(function(erro) { avisar(erro.message, 'erro'); });
+  });
+}
+
+// Cartão "Pedido de hoje" na tela inicial da empresa
+function renderizarPedidoHojeEmpresa(resumo) {
+  const caixa = $('pedidoHojeEmpresa');
+  caixa.innerHTML = '';
+  if (!resumo) return;
+
+  $('subtituloPedidoHojeEmpresa').textContent = resumo.prazo.aberto
+    ? 'Envie ou altere até ' + resumo.prazo.limite + '.'
+    : resumo.prazo.motivo;
+
+  if (resumo.status) {
+    const linha = el('div', 'linha-resumo-pedido');
+    linha.appendChild(el('strong', '', resumo.quantidade + (resumo.quantidade === 1 ? ' quentinha' : ' quentinhas')));
+    linha.appendChild(etiquetaPedido(resumo.status));
+    caixa.appendChild(linha);
+
+    if (resumo.status === 'RECUSADO' && resumo.resposta_restaurante) {
+      caixa.appendChild(criarAlerta('Motivo: ' + resumo.resposta_restaurante));
+    }
+  } else if (resumo.prazo.aberto && resumo.cardapio_publicado) {
+    caixa.appendChild(criarAlerta('Você ainda não fez o pedido de hoje.', { tipo: 'info', icone: 'pedido' }));
+  } else if (!resumo.cardapio_publicado && resumo.prazo.aberto) {
+    caixa.appendChild(criarAlerta('O cardápio de hoje ainda não foi publicado.', { tipo: 'info', icone: 'cardapio' }));
+  }
+
+  if (resumo.prazo.aberto && resumo.cardapio_publicado) {
+    caixa.appendChild(criarBotao(resumo.status ? 'Ver ou alterar o pedido' : 'Fazer o pedido de hoje', {
+      classe: 'botao-primario botao-largo', icone: 'pedido',
+      aoClicar: function() { irPara('pedidos-empresa'); }
+    }));
+  } else if (resumo.status) {
+    caixa.appendChild(criarBotao('Ver o pedido', {
+      classe: 'botao-secundario botao-largo', icone: 'pedido',
+      aoClicar: function() { irPara('pedidos-empresa'); }
+    }));
+  }
+}
+
+// ================================================================
+// RESTAURANTE: PEDIDOS DO DIA
+// ================================================================
+const pedidosAdmin = {
+  data: null,
+  dias: {}         // { data: { dia, em } }
+};
+
+TELAS['pedidos'] = {
+  carregar: function(parametros) {
+    abrirPedidosDia(parametros.data || pedidosAdmin.data || hojeTexto());
+  }
+};
+
+function abrirPedidosDia(data) {
+  pedidosAdmin.data = data;
+  const guardado = pedidosAdmin.dias[data];
+
+  if (guardado) {
+    renderizarPedidosDia(guardado.dia);
+  } else {
+    $('pedidosTopo').innerHTML = '';
+    $('pedidosTopo').appendChild(criarNavegacaoDia(data));
+    mostrarCarregandoLista($('pedidosConteudo'), 4);
+  }
+
+  // Pedidos mudam o tempo todo: sempre busca a versão mais nova
+  // (o que estava na memória aparece na hora, enquanto isso)
+  buscarPedidosDia(data, !!guardado);
+}
+
+function buscarPedidosDia(data, silencioso) {
+  return apiSessao('listarPedidosDia', data)
+    .then(function(dia) {
+      pedidosAdmin.dias[data] = { dia: dia, em: Date.now() };
+      if (estado.telaAtual === 'pedidos' && pedidosAdmin.data === data) renderizarPedidosDia(dia);
+    })
+    .catch(function(erro) {
+      if (silencioso) return;
+      falhaAoAtualizar($('pedidosConteudo'), erro, function() { abrirPedidosDia(data); }, !!pedidosAdmin.dias[data]);
+    });
+}
+
+function aplicarDiaAtualizado(dia) {
+  if (!dia) return;
+  pedidosAdmin.dias[dia.data] = { dia: dia, em: Date.now() };
+  if (typeof resumoAdmin !== 'undefined') resumoAdmin = null;
+  if (estado.telaAtual === 'pedidos' && pedidosAdmin.data === dia.data) renderizarPedidosDia(dia);
+}
+
+function criarNavegacaoDia(data) {
+  const nav = el('div', 'semana-nav');
+
+  const anterior = el('button', 'botao-icone');
+  anterior.type = 'button';
+  anterior.title = 'Dia anterior';
+  anterior.innerHTML = icone('anterior');
+  anterior.addEventListener('click', function() { abrirPedidosDia(somarDias(data, -1)); });
+
+  const proximo = el('button', 'botao-icone');
+  proximo.type = 'button';
+  proximo.title = 'Próximo dia';
+  proximo.innerHTML = icone('proximo');
+  proximo.addEventListener('click', function() { abrirPedidosDia(somarDias(data, 1)); });
+
+  const textos = el('div', 'semana-textos');
+  textos.appendChild(el('strong', '', nomeDoDiaCompleto(data)));
+  textos.appendChild(el('span', '', data === hojeTexto() ? 'Hoje' : formatarData(data)));
+
+  nav.appendChild(anterior);
+  nav.appendChild(textos);
+  nav.appendChild(proximo);
+
+  if (data !== hojeTexto()) {
+    nav.appendChild(criarBotao('Hoje', {
+      classe: 'botao-fantasma botao-pequeno',
+      aoClicar: function() { abrirPedidosDia(hojeTexto()); }
+    }));
+  }
+
+  return nav;
+}
+
+function renderizarPedidosDia(dia) {
+  const topo = $('pedidosTopo');
+  const conteudo = $('pedidosConteudo');
+
+  topo.innerHTML = '';
+  topo.appendChild(criarNavegacaoDia(dia.data));
+
+  const prazo = el('div', 'prazo-pedidos');
+  if (dia.data === hojeTexto()) prazo.appendChild(criarIndicadorAoVivo());
+  prazo.appendChild(el('span', '', dia.prazo.aberto
+    ? 'Recebendo pedidos até ' + dia.prazo.limite
+    : (dia.data === dia.prazo.hoje ? 'Pedidos encerrados (limite ' + dia.prazo.limite + ')' : 'Limite diário: ' + dia.prazo.limite)));
+  if (podeFazer('pedidos_horario')) {
+    prazo.appendChild(criarBotao('Alterar horário', {
+      classe: 'botao-fantasma botao-pequeno',
+      aoClicar: abrirHorarioLimite
+    }));
+  }
+  topo.appendChild(prazo);
+
+  const pendentes = dia.pedidos.filter(function(p) { return p.status === 'ENVIADO'; });
+  const ativos = dia.pedidos.filter(pedidoAtivo);
+  const acoes = el('div', 'cardapio-acoes');
+
+  if (pendentes.length) {
+    acoes.appendChild(criarBotao('Confirmar todos (' + pendentes.length + ')', {
+      classe: 'botao-primario', icone: 'check',
+      aoClicar: function(evento) { confirmarTodosPedidos(dia, evento.currentTarget); }
+    }));
+  }
+
+  if (dia.data >= hojeTexto()) {
+    acoes.appendChild(criarBotao('Pedido de cliente', {
+      classe: 'botao-secundario', icone: 'cliente',
+      titulo: 'Registrar o pedido de um cliente que não tem cadastro',
+      aoClicar: function() { abrirPedidoCliente(dia); }
+    }));
+  }
+
+  if (ativos.length) {
+    acoes.appendChild(criarBotao('Imprimir', {
+      classe: 'botao-secundario', icone: 'imprimir',
+      titulo: 'Imprimir os pedidos para a cozinha',
+      aoClicar: function() { abrirImpressao(dia); }
+    }));
+  }
+
+  acoes.appendChild(criarBotaoSom());
+  topo.appendChild(acoes);
+
+  conteudo.innerHTML = '';
+
+  // Indicadores
+  const indicadores = el('div', 'grade-indicadores');
+  indicadores.appendChild(criarIndicador({
+    icone: 'pedido',
+    rotulo: 'Quentinhas',
+    valor: dia.producao.total,
+    detalhe: dia.producao.confirmadas + ' confirmada(s)' +
+      (dia.producao.avulsas ? ' · ' + dia.producao.avulsas + ' avulsa(s)' : '') +
+      (dia.producao.clientes ? ' · ' + dia.producao.clientes + ' de clientes' : '')
+  }));
+  indicadores.appendChild(criarIndicador({
+    icone: 'empresa',
+    cor: 'azul',
+    rotulo: 'Pedidos',
+    valor: dia.pedidos.filter(function(p) { return p.status !== 'CANCELADO'; }).length,
+    detalhe: pendentes.length ? pendentes.length + ' aguardando confirmação' : 'nenhum pendente'
+  }));
+  indicadores.appendChild(criarIndicador({
+    icone: 'alerta',
+    cor: dia.sem_pedido.length ? 'amarelo' : '',
+    rotulo: 'Empresas sem pedido',
+    valor: dia.sem_pedido.length,
+    detalhe: dia.sem_pedido.slice(0, 2).join(', ') + (dia.sem_pedido.length > 2 ? '…' : '')
+  }));
+  conteudo.appendChild(indicadores);
+
+  const grade = el('div', 'grade-paineis');
+
+  // Pedidos das empresas
+  const colunaPedidos = el('div');
+  colunaPedidos.appendChild(el('h3', 'titulo-secao', 'Pedidos das empresas'));
+
+  if (!dia.pedidos.length) {
+    colunaPedidos.appendChild(estadoVazio({
+      icone: 'pedido',
+      titulo: 'Nenhum pedido',
+      texto: dia.cardapio
+        ? 'Nenhuma empresa enviou pedido para este dia.'
+        : 'Não há cardápio publicado para este dia.'
+    }));
+  }
+
+  dia.pedidos.forEach(function(pedido) { colunaPedidos.appendChild(criarCartaoPedido(pedido, dia)); });
+  grade.appendChild(colunaPedidos);
+
+  // Produção
+  grade.appendChild(criarCartaoProducao(dia));
+  conteudo.appendChild(grade);
+}
+
+function pedidoAtivo(pedido) {
+  return pedido.status === 'ENVIADO' || pedido.status === 'CONFIRMADO';
+}
+
+function criarCartaoPedido(pedido, dia) {
+  const cliente = pedido.cliente_avulso;
+  const cartao = el('div', 'cartao cartao-pedido' + (pedido.status === 'ENVIADO' ? ' pendente' : '') + (cliente ? ' cliente' : ''));
+  cartao.dataset.pedido = pedido.pedido_id;
+
+  const topo = el('div', 'cartao-pedido-topo');
+  const textos = el('div');
+  textos.appendChild(el('strong', '', pedido.nome_empresa));
+
+  let detalhe;
+
+  if (pedido.status === 'CANCELADO') {
+    detalhe = (cliente ? 'Cancelado às ' : 'Cancelado pela empresa às ') + horaDe(pedido.atualizado_em);
+  } else {
+    detalhe = pedido.quantidade_total + ' quentinha(s) · ' + formatarMoeda(pedido.valor_total) +
+      (cliente ? ' · registrado às ' : ' · enviado às ') + horaDe(pedido.atualizado_em || pedido.criado_em);
+  }
+
+  if (cliente) {
+    detalhe = 'Cliente sem cadastro' + (pedido.cliente_telefone ? ' · ' + pedido.cliente_telefone : '') + ' · ' + detalhe;
+  }
+
+  textos.appendChild(el('span', '', detalhe));
+  topo.appendChild(textos);
+  topo.appendChild(cliente && pedido.status === 'CONFIRMADO' ? criarEtiqueta('Cliente', 'azul') : etiquetaPedido(pedido.status));
+  cartao.appendChild(topo);
+
+  if (pedido.alterado_apos_confirmacao) {
+    cartao.appendChild(criarAlerta('A empresa alterou este pedido depois da sua confirmação.', { tipo: 'info', icone: 'editar' }));
+  }
+
+  if (pedido.status === 'RECUSADO' && pedido.resposta_restaurante) {
+    cartao.appendChild(el('div', 'dia-observacao', 'Motivo da recusa: ' + pedido.resposta_restaurante));
+  }
+
+  if (pedido.observacoes) {
+    cartao.appendChild(el('div', 'dia-observacao', (cliente ? 'Observação: ' : 'Observação da empresa: ') + pedido.observacoes));
+  }
+
+  if (pedido.status === 'CANCELADO') {
+    // Só o proprietário apaga, e só pedidos cancelados
+    if (estado.usuario.proprietario) {
+      const acoesCancelado = el('div', 'cartao-pedido-acoes');
+      acoesCancelado.appendChild(criarBotao('Apagar', {
+        classe: 'botao-fantasma botao-pequeno botao-texto-perigo', icone: 'lixeira',
+        titulo: 'Apagar este pedido cancelado de vez',
+        aoClicar: function(evento) { apagarPedidoCancelado(pedido, evento.currentTarget); }
+      }));
+      cartao.appendChild(acoesCancelado);
+    }
+    return cartao;
+  }
+
+  // Resumo por proteína dentro do pedido
+  const contagem = {};
+  pedido.itens.forEach(function(item) { contagem[item.proteina] = (contagem[item.proteina] || 0) + 1; });
+  const resumo = el('div', 'chips');
+  Object.keys(contagem).forEach(function(p) {
+    resumo.appendChild(el('span', 'chip destaque sem-botao', contagem[p] + '× ' + p));
+  });
+  cartao.appendChild(resumo);
+
+  const acoes = el('div', 'cartao-pedido-acoes');
+  acoes.appendChild(criarBotao('Ver itens', {
+    classe: 'botao-secundario botao-pequeno', icone: 'pedido',
+    aoClicar: function() { mostrarItensPedido(pedido); }
+  }));
+
+  acoes.appendChild(criarBotao('Imprimir', {
+    classe: 'botao-secundario botao-pequeno', icone: 'imprimir',
+    aoClicar: function() { imprimirPedidos(dia, [pedido], { resumo: false, separar: false }); }
+  }));
+
+  if (cliente) {
+    if (dia.data >= hojeTexto()) {
+      acoes.appendChild(criarBotao('Editar', {
+        classe: 'botao-secundario botao-pequeno', icone: 'editar',
+        aoClicar: function() { abrirPedidoCliente(dia, pedido); }
+      }));
+    }
+
+    acoes.appendChild(criarBotao('Cancelar', {
+      classe: 'botao-fantasma botao-pequeno botao-texto-perigo',
+      aoClicar: function(evento) { cancelarPedidoDeCliente(pedido, evento.currentTarget); }
+    }));
+
+    cartao.appendChild(acoes);
+    return cartao;
+  }
+
+  if (pedido.status === 'ENVIADO') {
+    acoes.appendChild(criarBotao('Confirmar', {
+      classe: 'botao-primario botao-pequeno', icone: 'check',
+      aoClicar: function(evento) { confirmarUmPedido(pedido, evento.currentTarget); }
+    }));
+  }
+
+  if (pedido.cobrado) {
+    acoes.appendChild(el('span', 'nota-cobrado', 'Já entrou numa cobrança'));
+  } else if (pedido.status === 'ENVIADO' || pedido.status === 'CONFIRMADO') {
+    acoes.appendChild(criarBotao('Recusar', {
+      classe: 'botao-fantasma botao-pequeno botao-texto-perigo',
+      aoClicar: function() { recusarUmPedido(pedido); }
+    }));
+  }
+
+  cartao.appendChild(acoes);
+  return cartao;
+}
+
+function criarCartaoProducao(dia) {
+  const cartao = el('div', 'cartao');
+  cartao.appendChild(el('h2', '', 'Produção do dia'));
+  cartao.appendChild(el('p', 'subtitulo-cartao', 'Pedidos enviados e confirmados.'));
+
+  const proteinas = Object.keys(dia.producao.por_proteina);
+
+  if (!proteinas.length) {
+    cartao.appendChild(el('div', 'contador', 'Nenhuma quentinha ainda.'));
+    return cartao;
+  }
+
+  const tabela = el('div', 'tabela-producao');
+  proteinas
+    .sort(function(a, b) { return dia.producao.por_proteina[b] - dia.producao.por_proteina[a]; })
+    .forEach(function(p) {
+      const linha = el('div', 'linha-producao');
+      linha.appendChild(el('span', '', p));
+      linha.appendChild(el('strong', '', String(dia.producao.por_proteina[p])));
+      tabela.appendChild(linha);
+    });
+
+  Object.keys(dia.producao.extras).forEach(function(extra) {
+    const linha = el('div', 'linha-producao extra');
+    linha.appendChild(el('span', '', extra + ' (extra)'));
+    linha.appendChild(el('strong', '', String(dia.producao.extras[extra])));
+    tabela.appendChild(linha);
+  });
+
+  const total = el('div', 'linha-producao total');
+  total.appendChild(el('span', '', 'Total de quentinhas'));
+  total.appendChild(el('strong', '', String(dia.producao.total)));
+  tabela.appendChild(total);
+  cartao.appendChild(tabela);
+
+  if (dia.producao.personalizadas.length) {
+    cartao.appendChild(el('div', 'grupo-titulo espaco-acima', 'Personalizadas (' + dia.producao.personalizadas.length + ')'));
+    const lista = el('div', 'lista-personalizadas');
+
+    dia.producao.personalizadas.forEach(function(p) {
+      const item = el('div', 'item-personalizado');
+      item.appendChild(el('strong', '', p.nome + (p.nome !== p.nome_empresa ? ' · ' + p.nome_empresa : '')));
+      const partes = [p.proteina];
+      if (p.itens_removidos.length) partes.push('sem ' + p.itens_removidos.join(', ').toLowerCase());
+      if (p.observacao) partes.push('obs.: ' + p.observacao);
+      item.appendChild(el('span', '', partes.join(' · ')));
+      lista.appendChild(item);
+    });
+
+    cartao.appendChild(lista);
+  }
+
+  return cartao;
+}
+
+function mostrarItensPedido(pedido) {
+  const caixa = el('div');
+
+  caixa.appendChild(el('p', 'texto-apoio', pedido.quantidade_total + ' quentinha(s) · ' +
+    formatarMoeda(pedido.valor_total) + ' · ' + (SITUACOES_PEDIDO[pedido.status] || {}).texto));
+
+  const lista = el('div', 'lista-itens-pedido');
+
+  pedido.itens.forEach(function(item) {
+    const linha = el('div', 'item-pedido');
+    const nome = el('div', 'item-pedido-nome');
+    nome.appendChild(el('strong', '', item.nome));
+    if (item.avulsa && !pedido.cliente_avulso) nome.appendChild(criarEtiqueta('Avulsa', 'cinza'));
+    linha.appendChild(nome);
+
+    const partes = [item.proteina];
+    if (item.opcao_extra) partes.push('+ ' + item.opcao_extra);
+    if (item.itens_removidos.length) partes.push('sem ' + item.itens_removidos.join(', ').toLowerCase());
+    if (item.observacao) partes.push('obs.: ' + item.observacao);
+    linha.appendChild(el('span', '', partes.join(' · ')));
+
+    lista.appendChild(linha);
+  });
+
+  caixa.appendChild(lista);
+
+  const rodape = el('div', 'modal-rodape');
+  rodape.appendChild(criarBotao('Fechar', { classe: 'botao-secundario', aoClicar: fecharModal }));
+  caixa.appendChild(rodape);
+
+  abrirModal('Pedido de ' + pedido.nome_empresa, caixa);
+}
+
+function confirmarUmPedido(pedido, botao) {
+  comCarregamento(botao, apiSessao('confirmarPedido', pedido.pedido_id))
+    .then(function(resposta) {
+      aplicarDiaAtualizado(resposta.dia);
+      avisar(resposta.mensagem);
+    })
+    .catch(function(erro) { avisar(erro.message, 'erro'); });
+}
+
+function confirmarTodosPedidos(dia, botao) {
+  const pendentes = dia.pedidos.filter(function(p) { return p.status === 'ENVIADO'; });
+
+  confirmar({
+    titulo: 'Confirmar ' + pendentes.length + ' pedido(s)?',
+    mensagem: pendentes.map(function(p) { return p.nome_empresa + ' (' + p.quantidade_total + ')'; }).join(', ') + '.',
+    textoBotao: 'Confirmar todos'
+  }).then(function(sim) {
+    if (!sim) return;
+
+    comCarregamento(botao, apiSessao('confirmarPedidosPendentes', dia.data))
+      .then(function(resposta) {
+        aplicarDiaAtualizado(resposta.dia);
+        avisar(resposta.mensagem);
+      })
+      .catch(function(erro) { avisar(erro.message, 'erro'); });
+  });
+}
+
+function recusarUmPedido(pedido) {
+  const form = el('form');
+  form.noValidate = true;
+
+  const erro = el('div', 'mensagem-erro');
+  erro.hidden = true;
+  form.appendChild(erro);
+
+  form.appendChild(el('p', 'texto-apoio', 'A empresa verá o motivo e, se ainda estiver no prazo, poderá corrigir e enviar de novo.'));
+
+  const campo = el('div', 'campo');
+  campo.appendChild(el('label', '', 'Motivo da recusa'));
+  const motivo = el('textarea');
+  motivo.maxLength = 300;
+  motivo.placeholder = 'Ex.: não conseguimos atender hoje por falta de gás';
+  campo.appendChild(motivo);
+  form.appendChild(campo);
+
+  const rodape = el('div', 'modal-rodape');
+  rodape.appendChild(criarBotao('Voltar', { classe: 'botao-secundario', aoClicar: fecharModal }));
+  const enviar = criarBotao('Recusar pedido', { classe: 'botao-perigo' });
+  enviar.type = 'submit';
+  rodape.appendChild(enviar);
+  form.appendChild(rodape);
+
+  form.addEventListener('submit', function(evento) {
+    evento.preventDefault();
+    erro.hidden = true;
+
+    comCarregamento(enviar, apiSessao('recusarPedido', pedido.pedido_id, motivo.value))
+      .then(function(resposta) {
+        fecharModal();
+        aplicarDiaAtualizado(resposta.dia);
+        avisar(resposta.mensagem);
+      })
+      .catch(function(falha) {
+        erro.textContent = falha.message;
+        erro.hidden = false;
+      });
+  });
+
+  abrirModal('Recusar pedido de ' + pedido.nome_empresa, form, { pequeno: true });
+}
+
+function abrirHorarioLimite() {
+  const atual = pedidosAdmin.dias[pedidosAdmin.data] ? pedidosAdmin.dias[pedidosAdmin.data].dia.prazo.limite : '09:00';
+  const form = el('form');
+  form.noValidate = true;
+
+  const erro = el('div', 'mensagem-erro');
+  erro.hidden = true;
+  form.appendChild(erro);
+
+  const campo = el('div', 'campo');
+  campo.appendChild(el('label', '', 'As empresas podem enviar ou alterar o pedido do dia até:'));
+  const hora = el('input');
+  hora.type = 'time';
+  hora.value = atual;
+  campo.appendChild(hora);
+  form.appendChild(campo);
+
+  const rodape = el('div', 'modal-rodape');
+  rodape.appendChild(criarBotao('Cancelar', { classe: 'botao-secundario', aoClicar: fecharModal }));
+  const salvar = criarBotao('Salvar', { classe: 'botao-primario' });
+  salvar.type = 'submit';
+  rodape.appendChild(salvar);
+  form.appendChild(rodape);
+
+  form.addEventListener('submit', function(evento) {
+    evento.preventDefault();
+
+    comCarregamento(salvar, apiSessao('salvarHorarioLimite', hora.value))
+      .then(function(resposta) {
+        fecharModal();
+        avisar(resposta.mensagem);
+        pedidosAdmin.dias = {};
+        abrirPedidosDia(pedidosAdmin.data);
+      })
+      .catch(function(falha) {
+        erro.textContent = falha.message;
+        erro.hidden = false;
+      });
+  });
+
+  abrirModal('Horário limite dos pedidos', form, { pequeno: true });
+}
+
+// Cartão "Pedidos de hoje" na tela inicial do restaurante
+function renderizarPedidosHojeAdmin(resumo) {
+  const caixa = $('pedidosHojeAdmin');
+  caixa.innerHTML = '';
+  if (!resumo) return;
+
+  $('subtituloPedidosHojeAdmin').textContent = resumo.prazo.aberto
+    ? 'Recebendo pedidos até ' + resumo.prazo.limite + '.'
+    : (resumo.prazo.motivo || 'Pedidos encerrados.');
+
+  const linha = el('div', 'linha-resumo-pedido');
+  linha.appendChild(el('strong', '', resumo.quentinhas + (resumo.quentinhas === 1 ? ' quentinha' : ' quentinhas')));
+  linha.appendChild(el('span', 'contador', 'em ' + resumo.pedidos + ' pedido(s)'));
+  caixa.appendChild(linha);
+
+  if (resumo.pendentes) {
+    caixa.appendChild(criarAlerta(resumo.pendentes + ' pedido(s) aguardando sua confirmação.', { icone: 'pedido' }));
+  }
+
+  caixa.appendChild(criarBotao('Abrir pedidos de hoje', {
+    classe: resumo.pendentes ? 'botao-primario botao-largo' : 'botao-secundario botao-largo',
+    icone: 'pedido',
+    aoClicar: function() { irPara('pedidos', { data: resumo.data }); }
+  }));
+}
+
+// ================================================================
+// RESTAURANTE: PEDIDO DE CLIENTE SEM CADASTRO
+// O pedido já entra confirmado e vai direto para a produção do dia.
+// ================================================================
+// O campo de valor usa a máscara de caixa registradora (os dígitos são
+// centavos): "20,00" e "2,000" (ainda sendo formatado) valem R$ 20,00
+function textoParaValor(texto) {
+  const digitos = String(texto || '').replace(/\D/g, '');
+  return digitos ? Number(digitos) / 100 : 0;
+}
+
+function valorParaCampo(valor) {
+  if (!valor) return '';
+  return aplicarMascara(String(Math.round(Number(valor) * 100)), 'moeda');
+}
+
+function abrirPedidoCliente(dia, pedido) {
+  if (!dia.cardapio || !dia.cardapio.proteinas.length) {
+    avisar('Publique o cardápio de ' + formatarData(dia.data) + ' antes de registrar pedidos.', 'erro');
+    return;
+  }
+
+  const proteinas = dia.cardapio.proteinas;
+  const extras = dia.opcoes_extra || [];
+  const form = el('form', 'form-pedido-cliente');
+  form.noValidate = true;
+
+  const erro = el('div', 'mensagem-erro');
+  erro.hidden = true;
+  form.appendChild(erro);
+
+  form.appendChild(el('p', 'texto-apoio', 'Para quem não tem cadastro. O pedido já entra confirmado na produção de ' +
+    nomeDoDiaCompleto(dia.data).toLowerCase() + '.'));
+
+  function criarCampo(rotulo, campo, classe) {
+    const caixa = el('div', 'campo' + (classe ? ' ' + classe : ''));
+    caixa.appendChild(el('label', '', rotulo));
+    caixa.appendChild(campo);
+    return caixa;
+  }
+
+  const grade = el('div', 'grade-2');
+
+  const nome = el('input');
+  nome.maxLength = 80;
+  nome.placeholder = 'Ex.: Marcos (oficina da esquina)';
+  nome.value = pedido ? pedido.nome_empresa : '';
+  grade.appendChild(criarCampo('Nome do cliente', nome, 'inteiro'));
+
+  const telefone = el('input');
+  telefone.type = 'tel';
+  telefone.dataset.mascara = 'telefone';
+  telefone.placeholder = '(00) 00000-0000';
+  telefone.value = pedido ? pedido.cliente_telefone : '';
+  const campoTelefone = criarCampo('Telefone ', telefone);
+  campoTelefone.querySelector('label').appendChild(el('span', 'secundario', '(opcional)'));
+  grade.appendChild(campoTelefone);
+
+  const valor = el('input');
+  valor.inputMode = 'numeric';
+  valor.dataset.mascara = 'moeda';
+  valor.placeholder = 'R$ 0,00';
+  valor.value = valorParaCampo(pedido && pedido.quantidade_total
+    ? pedido.valor_total / pedido.quantidade_total
+    : dia.preco_cliente_avulso);
+  grade.appendChild(criarCampo('Valor de cada quentinha', valor));
+
+  form.appendChild(grade);
+
+  form.appendChild(el('div', 'grupo-titulo', 'Quentinhas'));
+  const linhas = el('div', 'linhas-cliente');
+  form.appendChild(linhas);
+
+  function criarSeletor(opcoes, valorAtual) {
+    const seletor = el('select');
+    opcoes.forEach(function(opcao) {
+      const item = el('option', '', opcao.texto);
+      item.value = opcao.valor;
+      seletor.appendChild(item);
+    });
+    seletor.value = valorAtual || opcoes[0].valor;
+    return seletor;
+  }
+
+  function adicionarLinha(dados) {
+    dados = dados || {};
+    const linha = el('div', 'linha-cliente');
+
+    const proteina = criarSeletor(
+      (proteinas.length > 1 ? [{ valor: '', texto: 'Proteína…' }] : []).concat(
+        proteinas.map(function(p) { return { valor: p, texto: p }; })
+      ),
+      dados.proteina
+    );
+    proteina.dataset.campo = 'proteina';
+    linha.appendChild(proteina);
+
+    if (extras.length) {
+      const extra = criarSeletor(
+        [{ valor: '', texto: 'Sem extra' }].concat(extras.map(function(e) { return { valor: e, texto: e }; })),
+        dados.opcao_extra
+      );
+      extra.dataset.campo = 'opcao_extra';
+      linha.appendChild(extra);
+    }
+
+    const contador = el('div', 'contador-quantidade');
+    const menos = el('button', 'botao-icone pequeno', '−');
+    menos.type = 'button';
+    menos.title = 'Diminuir';
+    const quantidade = el('input');
+    quantidade.inputMode = 'numeric';
+    quantidade.dataset.campo = 'quantidade';
+    quantidade.value = String(dados.quantidade || 1);
+    quantidade.setAttribute('aria-label', 'Quantidade');
+    const mais = el('button', 'botao-icone pequeno', '+');
+    mais.type = 'button';
+    mais.title = 'Aumentar';
+
+    menos.addEventListener('click', function() {
+      quantidade.value = String(Math.max(1, (parseInt(quantidade.value, 10) || 1) - 1));
+      atualizarTotal();
+    });
+    mais.addEventListener('click', function() {
+      quantidade.value = String(Math.min(300, (parseInt(quantidade.value, 10) || 0) + 1));
+      atualizarTotal();
+    });
+    quantidade.addEventListener('input', function() {
+      quantidade.value = quantidade.value.replace(/\D/g, '').slice(0, 3);
+      atualizarTotal();
+    });
+
+    contador.appendChild(menos);
+    contador.appendChild(quantidade);
+    contador.appendChild(mais);
+    linha.appendChild(contador);
+
+    const remover = el('button', 'botao-icone pequeno remover-linha');
+    remover.type = 'button';
+    remover.title = 'Remover linha';
+    remover.innerHTML = icone('lixeira');
+    remover.addEventListener('click', function() {
+      if (linhas.children.length === 1) {
+        avisar('O pedido precisa de pelo menos uma linha.', 'erro');
+        return;
+      }
+      linha.remove();
+      atualizarTotal();
+    });
+    linha.appendChild(remover);
+
+    const observacao = el('input', 'campo-item observacao');
+    observacao.maxLength = 200;
+    observacao.placeholder = 'Observação (opcional). Ex.: sem feijão';
+    observacao.dataset.campo = 'observacao';
+    observacao.value = dados.observacao || '';
+    linha.appendChild(observacao);
+
+    linhas.appendChild(linha);
+    atualizarTotal();
+    return linha;
+  }
+
+  const adicionar = criarBotao('Adicionar outra proteína', {
+    classe: 'botao-fantasma botao-pequeno', icone: 'adicionar',
+    aoClicar: function() {
+      const linha = adicionarLinha();
+      linha.querySelector('select').focus();
+    }
+  });
+  form.appendChild(adicionar);
+
+  const observacoes = el('textarea');
+  observacoes.maxLength = 300;
+  observacoes.placeholder = 'Ex.: retira no balcão às 11h30';
+  observacoes.value = pedido ? pedido.observacoes : '';
+  const campoObservacoes = criarCampo('Observação do pedido ', observacoes, 'espaco-acima');
+  campoObservacoes.querySelector('label').appendChild(el('span', 'secundario', '(opcional)'));
+  form.appendChild(campoObservacoes);
+
+  const total = el('div', 'total-cliente');
+  form.appendChild(total);
+
+  function lerLinhas() {
+    return Array.prototype.map.call(linhas.children, function(linha) {
+      const dados = {};
+      linha.querySelectorAll('[data-campo]').forEach(function(campo) { dados[campo.dataset.campo] = campo.value.trim(); });
+      dados.quantidade = parseInt(dados.quantidade, 10) || 0;
+      return dados;
+    });
+  }
+
+  function atualizarTotal() {
+    const quantidade = lerLinhas().reduce(function(soma, l) { return soma + l.quantidade; }, 0);
+    total.innerHTML = '';
+    total.appendChild(el('strong', '', quantidade + (quantidade === 1 ? ' quentinha' : ' quentinhas')));
+    total.appendChild(el('span', '', formatarMoeda(quantidade * textoParaValor(valor.value))));
+  }
+
+  // Depois da máscara formatar o número (ela roda logo após este evento)
+  valor.addEventListener('input', function() { setTimeout(atualizarTotal, 0); });
+
+  // Linhas iniciais: as do pedido (agrupadas) ou uma em branco
+  if (pedido && pedido.itens.length) {
+    const grupos = [];
+    pedido.itens.forEach(function(item) {
+      const existente = grupos.find(function(g) {
+        return g.proteina === item.proteina && g.opcao_extra === item.opcao_extra && g.observacao === item.observacao;
+      });
+      if (existente) existente.quantidade++;
+      else grupos.push({ proteina: item.proteina, opcao_extra: item.opcao_extra, observacao: item.observacao, quantidade: 1 });
+    });
+    grupos.forEach(adicionarLinha);
+  } else {
+    adicionarLinha();
+  }
+
+  const rodape = el('div', 'modal-rodape');
+  rodape.appendChild(criarBotao('Cancelar', { classe: 'botao-secundario', aoClicar: fecharModal }));
+  const salvar = criarBotao(pedido ? 'Salvar alterações' : 'Registrar pedido', { classe: 'botao-primario', icone: 'check' });
+  salvar.type = 'submit';
+  rodape.appendChild(salvar);
+  form.appendChild(rodape);
+
+  form.addEventListener('submit', function(evento) {
+    evento.preventDefault();
+    erro.hidden = true;
+
+    function mostrarErro(texto) {
+      erro.textContent = texto;
+      erro.hidden = false;
+      erro.scrollIntoView({ block: 'nearest' });
+    }
+
+    const itens = lerLinhas();
+
+    if (nome.value.trim().length < 2) return mostrarErro('Informe o nome do cliente.');
+    if (!textoParaValor(valor.value)) return mostrarErro('Informe o valor de cada quentinha.');
+    if (itens.some(function(l) { return !l.proteina; })) return mostrarErro('Escolha a proteína de cada linha.');
+    if (itens.some(function(l) { return l.quantidade < 1; })) return mostrarErro('Informe a quantidade de cada linha.');
+
+    const dados = {
+      pedido_id: pedido ? pedido.pedido_id : '',
+      data: dia.data,
+      cliente_nome: nome.value,
+      cliente_telefone: telefone.value,
+      valor_unitario: valor.value,
+      observacoes: observacoes.value,
+      itens: itens
+    };
+
+    comCarregamento(salvar, apiSessao('salvarPedidoCliente', dados))
+      .then(function(resposta) {
+        fecharModal();
+        aplicarDiaAtualizado(resposta.dia_anterior);
+        aplicarDiaAtualizado(resposta.dia);
+        avisar(resposta.mensagem);
+      })
+      .catch(function(falha) { mostrarErro(falha.message); });
+  });
+
+  abrirModal(pedido ? 'Pedido de ' + pedido.nome_empresa : 'Pedido de cliente sem cadastro', form);
+}
+
+function cancelarPedidoDeCliente(pedido, botao) {
+  confirmar({
+    titulo: 'Cancelar o pedido de ' + pedido.nome_empresa + '?',
+    mensagem: 'As ' + pedido.quantidade_total + ' quentinha(s) saem da produção do dia.',
+    textoBotao: 'Cancelar pedido',
+    textoCancelar: 'Voltar',
+    perigo: true
+  }).then(function(sim) {
+    if (!sim) return;
+
+    comCarregamento(botao, apiSessao('cancelarPedidoCliente', pedido.pedido_id))
+      .then(function(resposta) {
+        aplicarDiaAtualizado(resposta.dia);
+        avisar(resposta.mensagem);
+      })
+      .catch(function(erro) { avisar(erro.message, 'erro'); });
+  });
+}
+
+function apagarPedidoCancelado(pedido, botao) {
+  confirmar({
+    titulo: 'Apagar pedido cancelado',
+    mensagem: 'Apagar de vez o pedido cancelado de ' + pedido.nome_empresa + '? Ele some da lista e do histórico. ' +
+      'Esta ação não pode ser desfeita.',
+    textoBotao: 'Apagar',
+    perigo: true
+  }).then(function(sim) {
+    if (!sim) return;
+
+    comCarregamento(botao, apiSessao('excluirPedidoCancelado', pedido.pedido_id))
+      .then(function(resposta) {
+        aplicarDiaAtualizado(resposta.dia);
+        avisar(resposta.mensagem, 'sucesso');
+      })
+      .catch(function(erro) { avisar(erro.message, 'erro'); });
+  });
+}
+
+// ================================================================
+// RESTAURANTE: IMPRIMIR PARA A COZINHA
+// Monta uma página só para o papel (área #areaImpressao) e abre a
+// janela de impressão do navegador. Também dá para "Salvar como PDF".
+// ================================================================
+function abrirImpressao(dia) {
+  const ativos = dia.pedidos.filter(pedidoAtivo);
+
+  if (!ativos.length) {
+    avisar('Não há pedidos para imprimir neste dia.', 'erro');
+    return;
+  }
+
+  const form = el('form');
+  form.noValidate = true;
+  form.appendChild(el('p', 'texto-apoio', 'Escolha o que imprimir. Pedidos cancelados ou recusados não entram.'));
+
+  const lista = el('div', 'lista-impressao');
+  const marcadores = [];
+
+  ativos.forEach(function(pedido) {
+    const rotulo = el('label', 'opcao-impressao');
+    const marcar = el('input');
+    marcar.type = 'checkbox';
+    marcar.checked = true;
+    marcadores.push({ marcar: marcar, pedido: pedido });
+    rotulo.appendChild(marcar);
+
+    const textos = el('div');
+    textos.appendChild(el('strong', '', pedido.nome_empresa));
+    textos.appendChild(el('span', '', pedido.quantidade_total + ' quentinha(s)' +
+      (pedido.status === 'ENVIADO' ? ' · aguardando confirmação' : '') +
+      (pedido.cliente_avulso ? ' · cliente sem cadastro' : '')));
+    rotulo.appendChild(textos);
+    lista.appendChild(rotulo);
+  });
+
+  const todos = criarBotao('Desmarcar todos', {
+    classe: 'botao-fantasma botao-pequeno',
+    aoClicar: function() {
+      const marcarTodos = marcadores.every(function(m) { return !m.marcar.checked; });
+      marcadores.forEach(function(m) { m.marcar.checked = marcarTodos; });
+      todos.textContent = marcarTodos ? 'Desmarcar todos' : 'Marcar todos';
+    }
+  });
+
+  form.appendChild(todos);
+  form.appendChild(lista);
+
+  function criarOpcao(texto, detalhe, marcado) {
+    const rotulo = el('label', 'opcao-checkbox');
+    const marcar = el('input');
+    marcar.type = 'checkbox';
+    marcar.checked = marcado;
+    rotulo.appendChild(marcar);
+    const textos = el('div');
+    textos.appendChild(el('strong', '', texto));
+    textos.appendChild(el('span', '', detalhe));
+    rotulo.appendChild(textos);
+    form.appendChild(rotulo);
+    return marcar;
+  }
+
+  const resumo = criarOpcao('Resumo da produção', 'Uma tabela com as quantidades de cada proteína por empresa.', ativos.length > 1);
+  const separar = criarOpcao('Cada pedido em uma folha', 'Facilita entregar cada empresa para uma pessoa da cozinha.', true);
+
+  const rodape = el('div', 'modal-rodape');
+  rodape.appendChild(criarBotao('Cancelar', { classe: 'botao-secundario', aoClicar: fecharModal }));
+  const imprimir = criarBotao('Imprimir', { classe: 'botao-primario', icone: 'imprimir' });
+  imprimir.type = 'submit';
+  rodape.appendChild(imprimir);
+  form.appendChild(rodape);
+
+  form.addEventListener('submit', function(evento) {
+    evento.preventDefault();
+
+    const escolhidos = marcadores.filter(function(m) { return m.marcar.checked; }).map(function(m) { return m.pedido; });
+
+    if (!escolhidos.length && !resumo.checked) {
+      avisar('Marque pelo menos um pedido.', 'erro');
+      return;
+    }
+
+    fecharModal();
+    imprimirPedidos(dia, escolhidos, { resumo: resumo.checked, separar: separar.checked });
+  });
+
+  abrirModal('Imprimir pedidos', form, { pequeno: true });
+}
+
+// Ordem das proteínas: a mesma do cardápio
+function ordemProteinas(dia) {
+  const ordem = (dia.cardapio && dia.cardapio.proteinas.slice()) || [];
+  dia.pedidos.forEach(function(p) {
+    p.itens.forEach(function(item) {
+      if (ordem.indexOf(item.proteina) === -1) ordem.push(item.proteina);
+    });
+  });
+  return ordem;
+}
+
+// Quentinha com alguma mudança: itens retirados ou observação
+function itemAlterado(item) {
+  return !!(item.itens_removidos.length || item.observacao);
+}
+
+function criarTabelaImpressao(itens, proteinas, alteradas) {
+  const tabela = el('table', 'imp-tabela' + (alteradas ? ' imp-tabela-alteradas' : ''));
+  const cabeca = el('tr');
+  ['', 'Nome', 'Proteína', 'Extra', alteradas ? 'Alteração' : 'Observações'].forEach(function(titulo, i) {
+    cabeca.appendChild(el('th', i === 0 ? 'marcar' : '', titulo));
+  });
+  tabela.appendChild(el('thead')).appendChild(cabeca);
+
+  const corpo = el('tbody');
+  itens
+    .slice()
+    .sort(function(a, b) {
+      return (proteinas.indexOf(a.proteina) - proteinas.indexOf(b.proteina)) ||
+        a.nome.localeCompare(b.nome, 'pt-BR');
+    })
+    .forEach(function(item) {
+      const linha = el('tr');
+      linha.appendChild(el('td', 'marcar', '☐'));
+      linha.appendChild(el('td', '', item.nome));
+      linha.appendChild(el('td', '', item.proteina));
+      linha.appendChild(el('td', '', item.opcao_extra || '–'));
+
+      const notas = [];
+      if (item.itens_removidos.length) notas.push('SEM ' + item.itens_removidos.join(', ').toUpperCase());
+      if (item.observacao) notas.push(item.observacao);
+      linha.appendChild(el('td', alteradas ? 'imp-nota-alteracao' : '', notas.join(' · ')));
+      corpo.appendChild(linha);
+    });
+
+  tabela.appendChild(corpo);
+  return tabela;
+}
+
+function imprimirPedidos(dia, pedidos, opcoes) {
+  const area = $('areaImpressao');
+  area.innerHTML = '';
+
+  const proteinas = ordemProteinas(dia);
+  const totalGeral = pedidos.reduce(function(soma, p) { return soma + p.itens.length; }, 0);
+  const agora = new Date();
+
+  const cabecalho = el('div', 'imp-cabecalho');
+  cabecalho.appendChild(el('strong', '', 'Tempero de Mãe · Pedidos de ' + nomeDoDiaCompleto(dia.data).toLowerCase() + '/' + dia.data.slice(0, 4)));
+  cabecalho.appendChild(el('span', '', 'Impresso às ' + horaDe(agora.getTime()) + ' · ' +
+    totalGeral + (totalGeral === 1 ? ' quentinha' : ' quentinhas')));
+  area.appendChild(cabecalho);
+
+  let primeiraSecao = true;
+
+  function novaSecao(classe) {
+    const secao = el('section', classe + (!primeiraSecao && opcoes.separar ? ' imp-nova-folha' : ''));
+    primeiraSecao = false;
+    area.appendChild(secao);
+    return secao;
+  }
+
+  // ---------- RESUMO ----------
+  if (opcoes.resumo && pedidos.length) {
+    const secao = novaSecao('imp-resumo');
+    secao.appendChild(el('h2', '', 'Resumo da produção'));
+
+    if (dia.cardapio) {
+      const acompanha = dia.cardapio.acompanhamentos.concat(dia.cardapio.saladas, dia.cardapio.guarnicoes);
+      if (acompanha.length) secao.appendChild(el('p', 'imp-detalhe', 'Acompanha: ' + acompanha.join(', ')));
+    }
+
+    const tabela = el('table', 'imp-tabela imp-tabela-resumo');
+    const cabeca = el('tr');
+    cabeca.appendChild(el('th', '', 'Pedido'));
+    proteinas.forEach(function(p) { cabeca.appendChild(el('th', 'num', p)); });
+    cabeca.appendChild(el('th', 'num', 'Com alteração'));
+    cabeca.appendChild(el('th', 'num', 'Total'));
+    tabela.appendChild(el('thead')).appendChild(cabeca);
+
+    const corpo = el('tbody');
+    const somas = {};
+    const extras = {};
+    let somaAlteradas = 0;
+
+    pedidos.forEach(function(pedido) {
+      const linha = el('tr');
+      linha.appendChild(el('td', '', pedido.nome_empresa + (pedido.status === 'ENVIADO' ? ' *' : '')));
+      proteinas.forEach(function(p) {
+        const quantidade = pedido.itens.filter(function(i) { return i.proteina === p; }).length;
+        somas[p] = (somas[p] || 0) + quantidade;
+        linha.appendChild(el('td', 'num', quantidade ? String(quantidade) : '–'));
+      });
+      const alteradasPedido = pedido.itens.filter(itemAlterado).length;
+      somaAlteradas += alteradasPedido;
+      linha.appendChild(el('td', 'num', alteradasPedido ? String(alteradasPedido) : '–'));
+      linha.appendChild(el('td', 'num forte', String(pedido.itens.length)));
+      corpo.appendChild(linha);
+
+      pedido.itens.forEach(function(i) {
+        if (i.opcao_extra) extras[i.opcao_extra] = (extras[i.opcao_extra] || 0) + 1;
+      });
+    });
+
+    const linhaTotal = el('tr', 'imp-total');
+    linhaTotal.appendChild(el('td', '', 'Total'));
+    proteinas.forEach(function(p) { linhaTotal.appendChild(el('td', 'num', String(somas[p] || 0))); });
+    linhaTotal.appendChild(el('td', 'num', String(somaAlteradas)));
+    linhaTotal.appendChild(el('td', 'num', String(totalGeral)));
+    corpo.appendChild(linhaTotal);
+    tabela.appendChild(corpo);
+    secao.appendChild(tabela);
+
+    const textoExtras = Object.keys(extras).map(function(e) { return e + ': ' + extras[e]; });
+    if (textoExtras.length) secao.appendChild(el('p', 'imp-detalhe', 'Extras — ' + textoExtras.join(' · ')));
+
+    if (pedidos.some(function(p) { return p.status === 'ENVIADO'; })) {
+      secao.appendChild(el('p', 'imp-nota', '* Pedido ainda aguardando confirmação.'));
+    }
+  }
+
+  // ---------- UM BLOCO POR PEDIDO ----------
+  pedidos.forEach(function(pedido) {
+    const secao = novaSecao('imp-pedido');
+
+    const topo = el('div', 'imp-pedido-topo');
+    const textos = el('div');
+    textos.appendChild(el('h2', '', pedido.nome_empresa));
+
+    const detalhes = [];
+    if (pedido.cliente_avulso) detalhes.push('Cliente sem cadastro' + (pedido.cliente_telefone ? ' · ' + pedido.cliente_telefone : ''));
+    detalhes.push(formatarData(dia.data));
+    detalhes.push(pedido.status === 'ENVIADO' ? 'AGUARDANDO CONFIRMAÇÃO' : 'Confirmado');
+    textos.appendChild(el('p', 'imp-detalhe', detalhes.join(' · ')));
+    topo.appendChild(textos);
+
+    const quantidade = el('div', 'imp-quantidade');
+    quantidade.appendChild(el('strong', '', String(pedido.itens.length)));
+    quantidade.appendChild(el('span', '', pedido.itens.length === 1 ? 'quentinha' : 'quentinhas'));
+    topo.appendChild(quantidade);
+    secao.appendChild(topo);
+
+    // Totais do pedido
+    const contagem = [];
+    proteinas.forEach(function(p) {
+      const n = pedido.itens.filter(function(i) { return i.proteina === p; }).length;
+      if (n) contagem.push(p + ': ' + n);
+    });
+    const extras = {};
+    pedido.itens.forEach(function(i) { if (i.opcao_extra) extras[i.opcao_extra] = (extras[i.opcao_extra] || 0) + 1; });
+    Object.keys(extras).forEach(function(e) { contagem.push(e + ': ' + extras[e]); });
+    const totalAlteradas = pedido.itens.filter(itemAlterado).length;
+    if (totalAlteradas) contagem.push('Com alteração: ' + totalAlteradas);
+    secao.appendChild(el('p', 'imp-contagem', contagem.join('   ·   ')));
+
+    if (pedido.observacoes) secao.appendChild(el('p', 'imp-observacao', 'Observação: ' + pedido.observacoes));
+
+    // Lista das quentinhas: as normais primeiro; as que têm alguma
+    // alteração (itens retirados ou observação) ficam separadas embaixo
+    const alteradas = pedido.itens.filter(itemAlterado);
+    const normais = pedido.itens.filter(function(item) { return !itemAlterado(item); });
+
+    if (alteradas.length && normais.length) {
+      secao.appendChild(el('h3', 'imp-subtitulo', 'Quentinhas normais (' + normais.length + ')'));
+    }
+    if (normais.length) secao.appendChild(criarTabelaImpressao(normais, proteinas, false));
+
+    if (alteradas.length) {
+      secao.appendChild(el('h3', 'imp-subtitulo imp-alteradas',
+        '⚠ Com alteração (' + alteradas.length + ') — conferir antes de fechar'));
+      secao.appendChild(criarTabelaImpressao(alteradas, proteinas, true));
+    }
+  });
+
+  setTimeout(function() { window.print(); }, 60);
+}
+
+window.addEventListener('afterprint', function() {
+  $('areaImpressao').innerHTML = '';
+});
+
+// ================================================================
+// AO VIVO: pedidos aparecem sem precisar atualizar a página
+// Restaurante: confere a cada 15 segundos (também com a aba em segundo
+// plano, para tocar o aviso sonoro). Empresa: a cada 30 segundos.
+// ================================================================
+const aoVivo = {
+  versao: null,
+  pedidos: null,          // restaurante: { pedido_id: situação anterior }
+  pedidoEmpresa: null,    // empresa: resumo anterior do pedido de hoje
+  temporizador: null,
+  ocupado: false,
+  ultimaVerificacao: 0,
+  audio: null
+};
+
+AO_ENTRAR.push(function(dados, usuario) {
+  if (usuario.perfil === 'admin' && dados.resumo && dados.resumo.pedidos) {
+    atualizarPendencias(dados.resumo.pedidos.pendentes);
+  }
+
+  clearInterval(aoVivo.temporizador);
+  aoVivo.versao = null;
+  aoVivo.pedidos = null;
+  aoVivo.pedidoEmpresa = null;
+  aoVivo.temporizador = setInterval(verificarNovidades, usuario.perfil === 'admin' ? 15000 : 30000);
+  setTimeout(verificarNovidades, 1500);
+});
+
+document.addEventListener('visibilitychange', function() {
+  if (!document.hidden && Date.now() - aoVivo.ultimaVerificacao > 5000) verificarNovidades();
+});
+
+// O navegador só deixa tocar som depois de um clique na página
+document.addEventListener('click', function() {
+  if (aoVivo.audio) return;
+  try {
+    const Contexto = window.AudioContext || window.webkitAudioContext;
+    if (Contexto) aoVivo.audio = new Contexto();
+  } catch (erro) { /* sem som */ }
+});
+
+function verificarNovidades() {
+  if (!estado.token || !estado.usuario || aoVivo.ocupado) return;
+  if (document.hidden && estado.usuario.perfil !== 'admin') return;
+
+  aoVivo.ocupado = true;
+  aoVivo.ultimaVerificacao = Date.now();
+
+  apiSessao('novidadesPedidos', aoVivo.versao)
+    .then(function(resposta) {
+      atualizarIndicadorAoVivo(true);
+      if (resposta.recursos) aplicarRecursos(resposta.recursos);
+      if (!resposta.mudou) return;
+
+      const primeira = aoVivo.versao === null;
+      aoVivo.versao = resposta.versao;
+
+      if (estado.usuario.perfil === 'admin') {
+        receberNovidadesRestaurante(resposta, primeira);
+      } else {
+        receberNovidadesEmpresa(resposta, primeira);
+      }
+    })
+    .catch(function() { atualizarIndicadorAoVivo(false); })
+    .finally(function() { aoVivo.ocupado = false; });
+}
+
+// ---------- RESTAURANTE ----------
+function receberNovidadesRestaurante(resposta, primeira) {
+  const anteriores = aoVivo.pedidos || {};
+  const atuais = {};
+  const avisos = [];
+
+  resposta.pedidos.forEach(function(p) {
+    atuais[p.pedido_id] = p;
+    if (primeira || p.cliente_avulso) return;
+
+    const antes = anteriores[p.pedido_id];
+    const quentinhas = p.quantidade + (p.quantidade === 1 ? ' quentinha' : ' quentinhas');
+
+    if (!antes) {
+      if (p.status === 'ENVIADO') avisos.push('Novo pedido: ' + p.nome + ' (' + quentinhas + ')');
+    } else if (p.status === 'CANCELADO' && antes.status !== 'CANCELADO') {
+      avisos.push(p.nome + ' cancelou o pedido de hoje');
+    } else if (p.status === 'ENVIADO' && p.atualizado_em !== antes.atualizado_em) {
+      avisos.push(antes.status === 'CANCELADO'
+        ? 'Novo pedido: ' + p.nome + ' (' + quentinhas + ')'
+        : p.nome + ' alterou o pedido (' + quentinhas + ')');
+    }
+  });
+
+  aoVivo.pedidos = atuais;
+  atualizarPendencias(resposta.resumo.pendentes);
+
+  if (avisos.length) {
+    avisos.slice(0, 3).forEach(function(texto) { avisar(texto); });
+    if (avisos.length > 3) avisar('E mais ' + (avisos.length - 3) + ' novidade(s) nos pedidos.');
+    tocarAviso();
+  }
+
+  if (primeira) return;
+
+  // Tela inicial: atualiza o cartão "Pedidos de hoje"
+  if (typeof resumoAdmin !== 'undefined' && resumoAdmin) resumoAdmin.pedidos = resposta.resumo;
+  if (estado.telaAtual === 'inicio-admin') renderizarPedidosHojeAdmin(resposta.resumo);
+
+  // Tela de pedidos aberta no dia de hoje: busca a lista nova
+  const hoje = hojeTexto();
+  if (estado.telaAtual === 'pedidos' && pedidosAdmin.data === hoje) {
+    buscarPedidosDia(hoje, true);
+  } else {
+    delete pedidosAdmin.dias[hoje];
+  }
+}
+
+function atualizarPendencias(quantidade) {
+  marcarContadorMenu('pedidos', quantidade || 0);
+  estado.pendenciasTitulo = quantidade || 0;
+  definirTitulo();
+}
+
+function somLigado() {
+  return lerPermanente('som_pedidos') !== 'nao';
+}
+
+function tocarAviso() {
+  if (!somLigado() || !aoVivo.audio) return;
+
+  try {
+    const contexto = aoVivo.audio;
+    if (contexto.state === 'suspended') contexto.resume();
+
+    [[784, 0], [1047, 0.18]].forEach(function(nota) {
+      const oscilador = contexto.createOscillator();
+      const volume = contexto.createGain();
+      const inicio = contexto.currentTime + nota[1];
+      oscilador.type = 'sine';
+      oscilador.frequency.value = nota[0];
+      volume.gain.setValueAtTime(0.0001, inicio);
+      volume.gain.exponentialRampToValueAtTime(0.3, inicio + 0.02);
+      volume.gain.exponentialRampToValueAtTime(0.0001, inicio + 0.35);
+      oscilador.connect(volume);
+      volume.connect(contexto.destination);
+      oscilador.start(inicio);
+      oscilador.stop(inicio + 0.4);
+    });
+  } catch (erro) { /* sem som */ }
+}
+
+function criarBotaoSom() {
+  const botao = el('button', 'botao-icone botao-som');
+  botao.type = 'button';
+
+  function desenhar() {
+    const ligado = somLigado();
+    botao.innerHTML = icone(ligado ? 'som' : 'semSom');
+    botao.title = ligado ? 'Aviso sonoro de novos pedidos: ligado' : 'Aviso sonoro de novos pedidos: desligado';
+    botao.classList.toggle('desligado', !ligado);
+  }
+
+  botao.addEventListener('click', function() {
+    guardarPermanente('som_pedidos', somLigado() ? 'nao' : 'sim');
+    desenhar();
+    if (somLigado()) tocarAviso();
+    avisar(somLigado() ? 'Aviso sonoro ligado.' : 'Aviso sonoro desligado.');
+  });
+
+  desenhar();
+  return botao;
+}
+
+function criarIndicadorAoVivo() {
+  const indicador = el('span', 'ao-vivo');
+  indicador.id = 'indicadorAoVivo';
+  indicador.appendChild(el('span', 'ao-vivo-ponto'));
+  indicador.appendChild(el('span', '', 'Ao vivo'));
+  indicador.title = 'Os pedidos novos aparecem sozinhos, sem precisar atualizar a página.';
+  return indicador;
+}
+
+function atualizarIndicadorAoVivo(conectado) {
+  const indicador = document.getElementById('indicadorAoVivo');
+  if (!indicador) return;
+  indicador.classList.toggle('sem-conexao', !conectado);
+  indicador.lastChild.textContent = conectado ? 'Ao vivo' : 'Reconectando…';
+}
+
+// ---------- EMPRESA ----------
+function receberNovidadesEmpresa(resposta, primeira) {
+  const atual = resposta.pedido_hoje;
+  const antes = aoVivo.pedidoEmpresa;
+  aoVivo.pedidoEmpresa = atual;
+
+  if (primeira || !antes) return;
+
+  const chave = function(r) { return [r.pedido_id, r.status, r.quantidade, r.atualizado_em, r.confirmado_em].join('|'); };
+  if (chave(antes) === chave(atual)) return;
+
+  if (atual.status !== antes.status || atual.confirmado_em !== antes.confirmado_em) {
+    if (atual.status === 'CONFIRMADO') {
+      avisar('O restaurante confirmou o seu pedido de hoje.');
+    } else if (atual.status === 'RECUSADO') {
+      avisar('O restaurante recusou o seu pedido' +
+        (atual.resposta_restaurante ? ': ' + atual.resposta_restaurante : '.'), 'erro');
+    }
+  }
+
+  if (typeof resumoEmpresa !== 'undefined' && resumoEmpresa) resumoEmpresa.pedido_hoje = atual;
+  if (estado.telaAtual === 'inicio-empresa') renderizarPedidoHojeEmpresa(atual);
+
+  // Só recarrega a tela do pedido se a pessoa não estiver no meio de uma alteração
+  if (estado.telaAtual === 'pedidos-empresa' && !pedidoEmpresa.alterado && $('modalFundo').hidden) {
+    carregarPedidoEmpresa();
+  }
+}
+</script>

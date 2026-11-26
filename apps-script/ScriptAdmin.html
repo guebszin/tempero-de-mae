@@ -1,0 +1,1548 @@
+<script>
+// ================================================================
+// SCRIPTADMIN.html — telas do restaurante (administrador)
+// Início, Empresas, Preços e consulta de Funcionários.
+// ================================================================
+
+// ----------------------------------------------------------------
+// EMPRESAS EM MEMÓRIA (usadas em várias telas)
+// ----------------------------------------------------------------
+let empresas = [];
+let empresasCarregadas = false;
+let empresasEm = 0;
+
+let resumoAdmin = null;
+let resumoAdminEm = 0;
+
+// Ao sair: nada do restaurante fica na memória do aparelho
+AO_SAIR.push(function() {
+  empresas = [];
+  empresasCarregadas = false;
+  empresasEm = 0;
+  resumoAdmin = null;
+  resumoAdminEm = 0;
+  precos = [];
+  precosFiltro = null;
+  precosEm = 0;
+  funcionariosConsulta = [];
+  Object.keys(funcionariosPorEmpresa).forEach(function(id) { delete funcionariosPorEmpresa[id]; });
+});
+
+// Dados que chegam junto com o login: as telas abrem sem esperar
+AO_ENTRAR.push(function(dados, usuario) {
+  if (usuario.perfil !== 'admin') return;
+
+  if (dados.empresas) {
+    empresas = dados.empresas;
+    empresasCarregadas = true;
+    empresasEm = Date.now();
+    atualizarSeletoresEmpresas();
+  }
+
+  if (dados.resumo) {
+    resumoAdmin = dados.resumo;
+    resumoAdminEm = Date.now();
+  }
+});
+
+function buscarEmpresas() {
+  return apiSessao('listarEmpresas').then(function(lista) {
+    empresas = lista;
+    empresasCarregadas = true;
+    empresasEm = Date.now();
+    atualizarSeletoresEmpresas();
+    return lista;
+  });
+}
+
+// Atualiza uma empresa na memória depois de uma gravação (sem nova consulta)
+function aplicarEmpresaAtualizada(empresa) {
+  if (!empresa) return;
+
+  substituirItem(empresas, 'empresa_id', empresa);
+  ordenarPorNome(empresas, 'nome_empresa');
+  atualizarSeletoresEmpresas();
+
+  // O nome pode ter mudado: atualiza também o histórico de preços
+  precos.forEach(function(p) {
+    if (p.empresa_id === empresa.empresa_id) p.nome_empresa = empresa.nome_empresa;
+  });
+
+  resumoAdmin = null; // o painel inicial será recalculado na próxima visita
+
+  if (estado.telaAtual === 'empresas') renderizarEmpresas();
+}
+
+function aplicarEmpresaExcluida(empresaId) {
+  removerItem(empresas, 'empresa_id', empresaId);
+  precos = precos.filter(function(p) { return p.empresa_id !== empresaId; });
+  delete funcionariosPorEmpresa[empresaId];
+  atualizarSeletoresEmpresas();
+  resumoAdmin = null;
+
+  if (estado.telaAtual === 'empresas') renderizarEmpresas();
+}
+
+function garantirEmpresas() {
+  return empresasCarregadas ? Promise.resolve(empresas) : buscarEmpresas();
+}
+
+function preencherSeletorEmpresas(seletor, textoVazio, somenteAtivas) {
+  const valorAtual = seletor.value;
+  seletor.innerHTML = '';
+
+  const vazio = el('option', '', textoVazio);
+  vazio.value = '';
+  seletor.appendChild(vazio);
+
+  empresas
+    .filter(function(e) { return !somenteAtivas || e.status === 'ATIVO'; })
+    .forEach(function(e) {
+      const opcao = el('option', '', e.nome_empresa + (e.status === 'ATIVO' ? '' : ' (inativa)'));
+      opcao.value = e.empresa_id;
+      seletor.appendChild(opcao);
+    });
+
+  seletor.value = valorAtual;
+  if (seletor.value !== valorAtual) seletor.value = '';
+}
+
+function atualizarSeletoresEmpresas() {
+  preencherSeletorEmpresas($('filtroEmpresaPrecos'), 'Todas as empresas', false);
+  preencherSeletorEmpresas($('filtroEmpresaFuncionarios'), 'Selecione uma empresa', false);
+}
+
+// ----------------------------------------------------------------
+// INÍCIO
+// ----------------------------------------------------------------
+TELAS['inicio-admin'] = { carregar: carregarInicioAdmin };
+
+function carregarInicioAdmin() {
+  $('saudacaoAdmin').textContent = saudacaoDoHorario() + ', ' + primeiroNome(estado.usuario.nome) + '!';
+  $('dataHojeAdmin').textContent = hojePorExtenso();
+
+  const tinhaDados = !!resumoAdmin;
+
+  if (tinhaDados) {
+    renderizarResumoAdmin(resumoAdmin);
+  } else {
+    mostrarCarregandoLista($('indicadoresAdmin'), 3);
+    mostrarCarregandoLista($('alertasAdmin'), 2);
+  }
+
+  if (tinhaDados && recente(resumoAdminEm)) return;
+
+  apiSessao('obterResumoAdmin')
+    .then(function(r) {
+      resumoAdmin = r;
+      resumoAdminEm = Date.now();
+      if (estado.telaAtual === 'inicio-admin') renderizarResumoAdmin(r);
+    })
+    .catch(function(erro) {
+      if (!tinhaDados) $('indicadoresAdmin').innerHTML = '';
+      falhaAoAtualizar($('alertasAdmin'), erro, carregarInicioAdmin, tinhaDados);
+    });
+}
+
+function renderizarResumoAdmin(r) {
+  renderizarPedidosHojeAdmin(r.pedidos);
+
+  const indicadores = $('indicadoresAdmin');
+  const alertas = $('alertasAdmin');
+
+  indicadores.innerHTML = '';
+
+  indicadores.appendChild(criarIndicador({
+    icone: 'empresa',
+    rotulo: 'Empresas ativas',
+    valor: r.empresas_ativas,
+    detalhe: r.empresas_inativas ? r.empresas_inativas + ' inativa(s)' : 'clientes atendidos'
+  }));
+
+  indicadores.appendChild(criarIndicador({
+    icone: 'pessoas',
+    cor: 'azul',
+    rotulo: 'Funcionários ativos',
+    valor: r.funcionarios_ativos,
+    detalhe: 'nas empresas ativas'
+  }));
+
+  indicadores.appendChild(criarIndicador({
+    icone: 'preco',
+    cor: r.sem_preco.length ? 'amarelo' : '',
+    rotulo: 'Com preço vigente',
+    valor: r.empresas_com_preco + ' de ' + r.empresas_ativas,
+    detalhe: r.sem_preco.length ? r.sem_preco.length + ' sem preço hoje' : 'todas com preço'
+  }));
+
+  alertas.innerHTML = '';
+
+  if (!r.empresas_ativas) {
+    alertas.appendChild(criarAlerta('Comece cadastrando a primeira empresa cliente.', {
+      tipo: 'info',
+      icone: 'empresa',
+      botao: criarBotao('Cadastrar empresa', {
+        classe: 'botao-primario botao-pequeno',
+        aoClicar: function() { irPara('empresas'); abrirFormEmpresa(); }
+      })
+    }));
+    return;
+  }
+
+  r.sem_preco.forEach(function(e) {
+    alertas.appendChild(criarAlerta(e.nome_empresa + ' está sem preço vigente e não poderá fazer pedidos.', {
+      botao: criarBotao('Cadastrar preço', {
+        classe: 'botao-secundario botao-pequeno',
+        aoClicar: function() {
+          irPara('precos');
+          abrirFormPreco({ empresa_id: e.empresa_id });
+        }
+      })
+    }));
+  });
+
+  r.vencendo.forEach(function(p) {
+    alertas.appendChild(criarAlerta(
+      'O preço de ' + p.nome_empresa + ' (' + formatarMoeda(p.valor_unitario) + ') termina em ' +
+      formatarData(p.data_fim) + ' e ainda não há reajuste cadastrado.', {
+      botao: criarBotao('Cadastrar reajuste', {
+        classe: 'botao-secundario botao-pequeno',
+        aoClicar: function() {
+          irPara('precos');
+          abrirFormPreco({ empresa_id: p.empresa_id, data_inicio: p.proximo_dia });
+        }
+      })
+    }));
+  });
+
+  // Cardápio da semana atual e da próxima
+  let alertasCardapio = 0;
+  const cardapio = r.cardapio;
+
+  if (cardapio) {
+    const diaUtil = cardapio.dia_semana >= 1 && cardapio.dia_semana <= 5;
+
+    if (diaUtil && cardapio.semana_atual !== 'PUBLICADO') {
+      alertasCardapio++;
+      alertas.appendChild(criarAlerta(
+        cardapio.semana_atual === 'VAZIA'
+          ? 'O cardápio desta semana ainda não foi montado.'
+          : 'O cardápio desta semana está em rascunho: as empresas ainda não o veem.', {
+        icone: 'cardapio',
+        botao: criarBotao(cardapio.semana_atual === 'VAZIA' ? 'Montar cardápio' : 'Revisar e publicar', {
+          classe: 'botao-secundario botao-pequeno',
+          aoClicar: function() { irPara('cardapios', { segunda: cardapio.segunda_atual }); }
+        })
+      }));
+    }
+
+    // A partir de quinta-feira, lembra da próxima semana
+    const fimDaSemana = cardapio.dia_semana === 0 || cardapio.dia_semana >= 4;
+
+    if (fimDaSemana && cardapio.proxima_semana !== 'PUBLICADO') {
+      alertasCardapio++;
+      alertas.appendChild(criarAlerta(
+        cardapio.proxima_semana === 'VAZIA'
+          ? 'O cardápio da próxima semana ainda não foi montado.'
+          : 'O cardápio da próxima semana está em rascunho.', {
+        tipo: 'info',
+        icone: 'cardapio',
+        botao: criarBotao(cardapio.proxima_semana === 'VAZIA' ? 'Montar cardápio' : 'Revisar e publicar', {
+          classe: 'botao-secundario botao-pequeno',
+          aoClicar: function() { irPara('cardapios', { segunda: cardapio.segunda_proxima }); }
+        })
+      }));
+    }
+  }
+
+  if (!r.sem_preco.length && !r.vencendo.length && !alertasCardapio) {
+    alertas.appendChild(criarAlerta('Tudo em ordem. Nenhuma pendência no momento.', {
+      tipo: 'ok',
+      icone: 'check'
+    }));
+  }
+}
+
+// ----------------------------------------------------------------
+// EMPRESAS
+// ----------------------------------------------------------------
+TELAS['empresas'] = { carregar: carregarEmpresas };
+
+function carregarEmpresas() {
+  const tinhaDados = empresasCarregadas;
+
+  // Mostra na hora o que já está na memória e atualiza por trás
+  if (tinhaDados) {
+    renderizarEmpresas();
+  } else {
+    mostrarCarregandoLista($('listaEmpresas'));
+  }
+
+  if (tinhaDados && recente(empresasEm)) return;
+
+  buscarEmpresas()
+    .then(function() {
+      if (estado.telaAtual === 'empresas') renderizarEmpresas();
+    })
+    .catch(function(erro) {
+      falhaAoAtualizar($('listaEmpresas'), erro, carregarEmpresas, tinhaDados);
+    });
+}
+
+function renderizarEmpresas() {
+  const termo = normalizarBusca($('buscaEmpresas').value);
+  const status = $('filtroStatusEmpresas').value;
+
+  const filtradas = empresas.filter(function(e) {
+    if (status !== 'TODOS' && e.status !== status) return false;
+    if (!termo) return true;
+    return normalizarBusca(
+      e.nome_empresa + ' ' + e.cnpj + ' ' + e.email + ' ' + e.responsavel + ' ' + (e.login || '')
+    ).indexOf(termo) !== -1;
+  });
+
+  const ativas = empresas.filter(function(e) { return e.status === 'ATIVO'; }).length;
+  $('contadorEmpresas').textContent = empresas.length
+    ? ativas + ' ativa(s) de ' + empresas.length + ' cadastrada(s).'
+    : '';
+
+  renderizarLista($('listaEmpresas'), {
+    itens: filtradas,
+    apagada: function(e) { return e.status !== 'ATIVO'; },
+    vazio: empresas.length
+      ? { icone: 'busca', titulo: 'Nenhuma empresa encontrada', texto: 'Tente outra busca ou mude o filtro.' }
+      : {
+          icone: 'empresa',
+          titulo: 'Nenhuma empresa cadastrada',
+          texto: 'Cadastre a primeira empresa cliente para começar.',
+          botao: criarBotao('Nova empresa', {
+            classe: 'botao-primario', icone: 'adicionar',
+            aoClicar: function() { abrirFormEmpresa(); }
+          })
+        },
+    colunas: [
+      { titulo: 'Empresa', largura: 'minmax(0, 2fr)', valor: function(e) {
+        return textoDuplo(e.nome_empresa, e.cnpj || 'CNPJ não informado');
+      } },
+      { titulo: 'Responsável', largura: 'minmax(0, 2fr)', valor: function(e) {
+        return textoDuplo(e.responsavel || '—', e.login ? 'Usuário: ' + e.login : 'Sem usuário (entra pelo e-mail)', e.email);
+      } },
+      { titulo: 'Preço atual', largura: 'minmax(0, 1fr)', valor: function(e) {
+        if (e.status !== 'ATIVO') return '—';
+        return e.preco_vigente !== null
+          ? formatarMoeda(e.preco_vigente)
+          : criarEtiqueta('Sem preço', 'amarela');
+      } },
+      { titulo: 'Funcionários', largura: 'minmax(110px, .8fr)', valor: function(e) {
+        return String(e.funcionarios_ativos);
+      } },
+      { titulo: 'Situação', largura: 'minmax(0, 1fr)', valor: function(e) {
+        if (e.status !== 'ATIVO') return criarEtiqueta('Inativa', 'cinza');
+        if (!e.acesso_ativado) return criarEtiqueta(e.convite_expira ? 'Aguardando 1º acesso' : 'Convite vencido', 'amarela');
+        return criarEtiqueta('Ativa', 'verde');
+      } }
+    ],
+    larguraAcoes: '300px',
+    acoes: function(e) {
+      const botoes = [
+        criarBotao('Editar', {
+          classe: 'botao-secundario botao-pequeno', icone: 'editar',
+          aoClicar: function() { abrirFormEmpresa(e); }
+        })
+      ];
+
+      if (e.status === 'ATIVO') {
+        botoes.push(criarBotao(e.acesso_ativado ? 'Nova senha' : 'Convite', {
+          classe: 'botao-secundario botao-pequeno', icone: e.acesso_ativado ? 'chave' : 'convite',
+          titulo: e.acesso_ativado
+            ? 'Gera um link para a empresa criar uma nova senha'
+            : 'Gera o link para a empresa criar a senha no primeiro acesso',
+          aoClicar: function(evento) { enviarConviteEmpresa(e, evento.currentTarget); }
+        }));
+
+        botoes.push(criarBotao('Inativar', {
+          classe: 'botao-fantasma botao-pequeno botao-texto-perigo',
+          aoClicar: function(evento) { alterarStatusEmpresa(e, false, evento.currentTarget); }
+        }));
+      } else {
+        botoes.push(criarBotao('Reativar', {
+          classe: 'botao-secundario botao-pequeno',
+          aoClicar: function(evento) { alterarStatusEmpresa(e, true, evento.currentTarget); }
+        }));
+
+        if (podeFazer('empresas_excluir')) {
+          botoes.push(criarBotao('Excluir', {
+            classe: 'botao-fantasma botao-pequeno botao-texto-perigo',
+            aoClicar: function(evento) { abrirExcluirEmpresa(e, evento.currentTarget); }
+          }));
+        }
+      }
+
+      return botoes;
+    }
+  });
+}
+
+$('buscaEmpresas').addEventListener('input', renderizarEmpresas);
+$('filtroStatusEmpresas').addEventListener('change', renderizarEmpresas);
+$('botaoNovaEmpresa').addEventListener('click', function() { abrirFormEmpresa(); });
+
+// CADASTRAR OU EDITAR EMPRESA
+function abrirFormEmpresa(empresa) {
+  const editando = !!empresa;
+
+  abrirFormulario({
+    titulo: editando ? 'Editar empresa' : 'Nova empresa',
+    modelo: 'tplFormEmpresa',
+    textoBotao: editando ? 'Salvar alterações' : 'Cadastrar empresa',
+
+    aoAbrir: function(form) {
+      if (editando) {
+        preencherFormulario(form, {
+          nome: empresa.nome_empresa,
+          cnpj: empresa.cnpj,
+          telefone: empresa.telefone,
+          endereco: empresa.endereco,
+          responsavel: empresa.responsavel,
+          email: empresa.email,
+          login: empresa.login
+        });
+
+        form.querySelector('[data-somente-cadastro]').remove();
+        return;
+      }
+
+      // Sugere o usuário a partir do nome da empresa
+      let loginMexido = false;
+      form.elements.login.addEventListener('input', function() { loginMexido = true; });
+      form.elements.nome.addEventListener('input', function() {
+        if (!loginMexido) form.elements.login.value = sugerirLogin(form.elements.nome.value);
+      });
+    },
+
+    aoEnviar: function(dados) {
+      if (!dados.nome.trim()) throw new Error('Informe o nome da empresa.');
+      if (!dados.email.trim()) throw new Error('Informe o e-mail para contato.');
+      dados.login = dados.login.trim().toLowerCase();
+      if (!/^[a-z0-9][a-z0-9._-]{2,39}$/.test(dados.login)) {
+        throw new Error('O usuário precisa ter de 3 a 40 caracteres: letras sem acento, números, ponto, hífen ou sublinhado, sem espaços.');
+      }
+
+      if (editando) {
+        dados.empresa_id = empresa.empresa_id;
+        return apiSessao('editarEmpresa', dados);
+      }
+
+      return apiSessao('criarEmpresa', dados);
+    },
+
+    depois: function(resposta) {
+      aplicarEmpresaAtualizada(resposta.empresa);
+
+      if (editando) {
+        avisar(resposta.mensagem);
+        return;
+      }
+
+      mostrarConviteEmpresa(resposta.convite, 'Empresa cadastrada! Envie o convite para o responsável criar a senha.');
+    }
+  });
+}
+
+// "Padaria São José" → "padaria.sao.jose"
+function sugerirLogin(nome) {
+  return String(nome || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '.')
+    .replace(/^\.+|\.+$/g, '')
+    .slice(0, 40);
+}
+
+// CONVITE (primeiro acesso ou nova senha)
+// A senha atual continua valendo até a empresa criar a nova pelo link.
+function enviarConviteEmpresa(empresa, botao) {
+  if (!empresa.login) {
+    avisar('Defina o usuário de acesso da empresa (botão Editar) antes de enviar o convite.', 'erro');
+    abrirFormEmpresa(empresa);
+    return;
+  }
+
+  comCarregamento(botao, apiSessao('gerarConviteEmpresa', empresa.empresa_id))
+    .then(function(convite) {
+      buscarEmpresas().then(function() {
+        if (estado.telaAtual === 'empresas') renderizarEmpresas();
+      }).catch(function() { /* a lista atualiza depois */ });
+
+      mostrarConviteEmpresa(convite, convite.nova_senha
+        ? 'Envie o link para ' + (empresa.responsavel || empresa.nome_empresa) + ' criar uma nova senha. A senha atual continua valendo até lá.'
+        : 'Envie o convite para ' + (empresa.responsavel || empresa.nome_empresa) + ' criar a senha. Um convite novo cancela o anterior.');
+    })
+    .catch(function(erro) { avisar(erro.message, 'erro'); });
+}
+
+// INATIVAR OU REATIVAR EMPRESA
+function alterarStatusEmpresa(empresa, ativar, botao) {
+  const pergunta = ativar
+    ? Promise.resolve(true)
+    : confirmar({
+        titulo: 'Inativar ' + empresa.nome_empresa + '?',
+        mensagem: 'O responsável não conseguirá mais entrar no portal. ' +
+          'Funcionários, preços e histórico são mantidos, e você pode reativar quando quiser.',
+        textoBotao: 'Inativar empresa',
+        perigo: true
+      });
+
+  pergunta.then(function(sim) {
+    if (!sim) return;
+
+    comCarregamento(botao, apiSessao('alterarStatusEmpresa', empresa.empresa_id, ativar))
+      .then(function(resposta) {
+        avisar(resposta.mensagem);
+        aplicarEmpresaAtualizada(resposta.empresa);
+      })
+      .catch(function(erro) { avisar(erro.message, 'erro'); });
+  });
+}
+
+// EXCLUIR EMPRESA DEFINITIVAMENTE (somente empresas inativas)
+// Sem histórico: qualquer administrador exclui.
+// Com pedidos, cobranças ou pagamentos: só o proprietário. O histórico
+// fica guardado e continua nos relatórios e nas cobranças.
+function criarModeloExcluirEmpresa() {
+  if ($('tplExcluirEmpresa')) return;
+
+  const modelo = document.createElement('template');
+  modelo.id = 'tplExcluirEmpresa';
+  modelo.innerHTML =
+    '<form novalidate>' +
+      '<div class="mensagem-erro" data-erro hidden></div>' +
+      '<p data-descricao></p>' +
+      '<div data-resumo></div>' +
+      '<div data-confirmar>' +
+        '<div class="campo">' +
+          '<label>Para confirmar, digite o nome da empresa</label>' +
+          '<input name="confirmacao" autocomplete="off">' +
+        '</div>' +
+      '</div>' +
+      '<div class="modal-rodape">' +
+        '<button type="button" class="botao botao-secundario" data-cancelar>Cancelar</button>' +
+        '<button type="submit" class="botao botao-perigo" data-enviar disabled>Excluir definitivamente</button>' +
+      '</div>' +
+    '</form>';
+
+  document.body.appendChild(modelo);
+}
+
+function abrirExcluirEmpresa(empresa, botaoOrigem) {
+  criarModeloExcluirEmpresa();
+
+  // Primeiro descobre o que a empresa tem (pedidos, cobranças...)
+  const promessa = apiSessao('previaExclusaoEmpresa', empresa.empresa_id);
+  const carregando = botaoOrigem ? comCarregamento(botaoOrigem, promessa) : promessa;
+
+  carregando
+    .then(function(previa) { mostrarExcluirEmpresa(empresa, previa); })
+    .catch(function(erro) { avisar(erro.message, 'erro'); });
+}
+
+function mostrarExcluirEmpresa(empresa, previa) {
+  const comHistorico = previa.tem_historico;
+  const podeExcluir = !comHistorico || previa.proprietario;
+
+  abrirFormulario({
+    titulo: 'Excluir empresa',
+    modelo: 'tplExcluirEmpresa',
+    pequeno: true,
+    textoBotao: comHistorico ? 'Excluir e guardar histórico' : 'Excluir definitivamente',
+
+    aoAbrir: function(form) {
+      const descricao = form.querySelector('[data-descricao]');
+      descricao.textContent = 'Você está excluindo ';
+      descricao.appendChild(el('strong', '', previa.nome_empresa));
+      descricao.appendChild(document.createTextNode(
+        previa.funcionarios ? ', que tem ' + previa.funcionarios + ' funcionário(s) cadastrado(s).' : '.'
+      ));
+
+      const resumo = form.querySelector('[data-resumo]');
+
+      if (!comHistorico) {
+        resumo.appendChild(el('div', 'nota',
+          'Serão apagados a empresa, o acesso do responsável, os funcionários e os preços dela. ' +
+          'Esta ação não pode ser desfeita.'));
+      } else if (!previa.proprietario) {
+        resumo.appendChild(criarAlerta(
+          'Esta empresa tem pedidos, cobranças ou pagamentos registrados. ' +
+          'Somente o proprietário do sistema pode excluí-la. Enquanto isso, ela continua inativa, sem acesso ao portal.',
+          { tipo: 'aviso' }));
+        form.querySelector('[data-confirmar]').hidden = true;
+      } else {
+        resumo.appendChild(montarResumoExclusao(previa));
+      }
+
+      // O botão só libera quando o nome digitado confere
+      const campo = form.elements.confirmacao;
+      const botao = form.querySelector('[data-enviar]');
+      if (!podeExcluir) botao.hidden = true;
+
+      campo.addEventListener('input', function() {
+        botao.disabled = normalizarBusca(campo.value).replace(/\s+/g, ' ').trim() !==
+          normalizarBusca(previa.nome_empresa).replace(/\s+/g, ' ').trim();
+      });
+    },
+
+    aoEnviar: function(dados) {
+      return apiSessao('excluirEmpresa', empresa.empresa_id, dados.confirmacao,
+        { manter_historico: comHistorico });
+    },
+
+    depois: function(resposta) {
+      avisar(resposta.mensagem, 'sucesso');
+      aplicarEmpresaExcluida(resposta.empresa_id);
+      if (typeof empresasExcluidasCarregadas !== 'undefined') empresasExcluidasCarregadas = false;
+    }
+  });
+}
+
+function montarResumoExclusao(previa) {
+  const caixa = el('div', 'resumo-exclusao');
+
+  function bloco(titulo, classe, linhas) {
+    if (!linhas.length) return;
+    const parte = el('div', 'parte-exclusao ' + classe);
+    parte.appendChild(el('strong', '', titulo));
+    const lista = el('ul');
+    linhas.forEach(function(texto) { lista.appendChild(el('li', '', texto)); });
+    parte.appendChild(lista);
+    caixa.appendChild(parte);
+  }
+
+  const guardados = [];
+  if (previa.pedidos) guardados.push(previa.pedidos + ' pedido(s)');
+  if (previa.cobrancas) {
+    guardados.push(previa.cobrancas + ' cobrança(s)' + (previa.cobrancas_abertas
+      ? ' — ' + previa.cobrancas_abertas + ' em aberto (' + formatarMoeda(previa.saldo_aberto) + ' a receber)'
+      : ''));
+  }
+  if (previa.pagamentos) guardados.push(previa.pagamentos + ' pagamento(s)');
+  bloco('Fica guardado nos relatórios e nas cobranças', 'guardado', guardados);
+
+  const apagados = ['Cadastro, acesso do responsável e convite'];
+  if (previa.funcionarios) apagados.push(previa.funcionarios + ' funcionário(s) (os nomes continuam nos relatórios)');
+  apagados.push('Preços e configurações da empresa');
+  if (previa.pedidos_futuros) apagados.push(previa.pedidos_futuros + ' pedido(s) com entrega futura serão cancelados');
+  bloco('Será apagado', 'apagado', apagados);
+
+  caixa.appendChild(el('div', 'nota',
+    'Nos relatórios ela aparece como "' + previa.nome_empresa + ' (excluída)". ' +
+    (previa.cobrancas_abertas ? 'As cobranças em aberto continuam em Cobranças para você registrar pagamentos. ' : '') +
+    'Esta ação não pode ser desfeita.'));
+
+  return caixa;
+}
+
+// ----------------------------------------------------------------
+// PREÇOS
+// ----------------------------------------------------------------
+let precos = [];
+let precosFiltro = null;  // empresa do filtro quando a lista foi carregada ('' = todas)
+let precosEm = 0;
+
+TELAS['precos'] = { carregar: carregarPrecos };
+
+const SITUACOES_PRECO = {
+  VIGENTE: { texto: 'Vigente', cor: 'verde' },
+  FUTURO: { texto: 'Futuro', cor: 'azul' },
+  ENCERRADO: { texto: 'Encerrado', cor: 'cinza' },
+  INATIVO: { texto: 'Inativo', cor: 'vermelha' },
+  ERRO: { texto: 'Data inválida', cor: 'amarela' }
+};
+
+function carregarPrecos() {
+  const filtro = $('filtroEmpresaPrecos').value;
+  const tinhaDados = precosFiltro === filtro;
+
+  if (tinhaDados) {
+    renderizarPrecos();
+  } else {
+    mostrarCarregandoLista($('listaPrecos'));
+  }
+
+  if (tinhaDados && recente(precosEm)) return;
+
+  garantirEmpresas()
+    .then(function() {
+      return apiSessao('listarPrecos', filtro);
+    })
+    .then(function(lista) {
+      if ($('filtroEmpresaPrecos').value !== filtro) return; // filtro mudou no meio
+      precos = lista;
+      precosFiltro = filtro;
+      precosEm = Date.now();
+      if (estado.telaAtual === 'precos') renderizarPrecos();
+    })
+    .catch(function(erro) {
+      falhaAoAtualizar($('listaPrecos'), erro, carregarPrecos, tinhaDados);
+    });
+}
+
+// Depois de gravar, o servidor devolve os preços daquela empresa
+function aplicarPrecosAtualizados(resposta) {
+  aplicarEmpresaAtualizada(resposta.empresa);
+
+  if (precosFiltro === null || !resposta.precos) return;
+  if (precosFiltro && precosFiltro !== resposta.empresa_id) return;
+
+  precos = precos
+    .filter(function(p) { return p.empresa_id !== resposta.empresa_id; })
+    .concat(resposta.precos)
+    .sort(function(a, b) {
+      const porEmpresa = a.nome_empresa.localeCompare(b.nome_empresa, 'pt-BR');
+      return porEmpresa !== 0 ? porEmpresa : b.data_inicio.localeCompare(a.data_inicio);
+    });
+
+  precosEm = Date.now();
+
+  if (estado.telaAtual === 'precos') renderizarPrecos();
+}
+
+function renderizarPrecos() {
+  const somenteAtuais = $('filtroSituacaoPrecos').value === 'ATUAIS';
+
+  const filtrados = precos.filter(function(p) {
+    return !somenteAtuais || p.status === 'VIGENTE' || p.status === 'FUTURO' || p.status === 'ERRO';
+  });
+
+  renderizarLista($('listaPrecos'), {
+    itens: filtrados,
+    apagada: function(p) { return p.status === 'ENCERRADO' || p.status === 'INATIVO'; },
+    vazio: precos.length
+      ? { icone: 'preco', titulo: 'Nenhum preço vigente ou futuro', texto: 'Escolha "Todo o histórico" para ver os preços encerrados.' }
+      : {
+          icone: 'preco',
+          titulo: 'Nenhum preço cadastrado',
+          texto: 'Defina o valor da quentinha de cada empresa.',
+          botao: podeFazer('precos_editar') ? criarBotao('Novo preço', {
+            classe: 'botao-primario', icone: 'adicionar',
+            aoClicar: function() { abrirFormPreco(); }
+          }) : null
+        },
+    colunas: [
+      { titulo: 'Empresa', largura: 'minmax(0, 2fr)', valor: function(p) {
+        return textoDuplo(p.nome_empresa, 'Quentinha ' + p.tipo_quentinha);
+      } },
+      { titulo: 'Valor', largura: 'minmax(0, 1fr)', valor: function(p) {
+        return formatarMoeda(p.valor_unitario);
+      } },
+      { titulo: 'Vigência', largura: 'minmax(0, 1.8fr)', valor: function(p) {
+        if (!p.data_inicio) return 'Data de início inválida';
+        return p.data_fim
+          ? formatarData(p.data_inicio) + ' a ' + formatarData(p.data_fim)
+          : 'A partir de ' + formatarData(p.data_inicio);
+      } },
+      { titulo: 'Situação', largura: 'minmax(0, 1fr)', valor: function(p) {
+        const situacao = SITUACOES_PRECO[p.status] || { texto: p.status, cor: 'cinza' };
+        return criarEtiqueta(situacao.texto, situacao.cor);
+      } }
+    ],
+    larguraAcoes: '200px',
+    acoes: function(p) {
+      const botoes = [];
+      if (!podeFazer('precos_editar')) return botoes;
+
+      if (p.status === 'VIGENTE' || p.status === 'FUTURO') {
+        botoes.push(criarBotao('Encerrar', {
+          classe: 'botao-secundario botao-pequeno', icone: 'calendario',
+          aoClicar: function() { abrirEncerrarPreco(p); }
+        }));
+      }
+
+      if (p.status === 'VIGENTE' || p.status === 'FUTURO' || p.status === 'ERRO') {
+        botoes.push(criarBotao('Inativar', {
+          classe: 'botao-fantasma botao-pequeno botao-texto-perigo',
+          aoClicar: function(evento) { inativarPrecoComConfirmacao(p, evento.currentTarget); }
+        }));
+      }
+
+      return botoes;
+    }
+  });
+}
+
+$('filtroEmpresaPrecos').addEventListener('change', carregarPrecos);
+$('filtroSituacaoPrecos').addEventListener('change', renderizarPrecos);
+$('botaoNovoPreco').addEventListener('click', function() { abrirFormPreco(); });
+
+// CADASTRAR PREÇO (pode vir pré-preenchido: { empresa_id, data_inicio })
+function abrirFormPreco(inicial) {
+  inicial = inicial || {};
+
+  garantirEmpresas()
+    .then(function() {
+      const ativas = empresas.filter(function(e) { return e.status === 'ATIVO'; });
+
+      if (!ativas.length) {
+        avisar('Cadastre uma empresa antes de definir preços.', 'erro');
+        return;
+      }
+
+      abrirFormulario({
+        titulo: 'Novo preço',
+        modelo: 'tplFormPreco',
+
+        aoAbrir: function(form) {
+          const seletor = form.elements.empresa_id;
+          const vazio = el('option', '', 'Selecione a empresa');
+          vazio.value = '';
+          seletor.appendChild(vazio);
+
+          ativas.forEach(function(e) {
+            const detalhe = e.preco_vigente !== null
+              ? ' — hoje ' + formatarMoeda(e.preco_vigente)
+              : ' — sem preço';
+            const opcao = el('option', '', e.nome_empresa + detalhe);
+            opcao.value = e.empresa_id;
+            seletor.appendChild(opcao);
+          });
+
+          seletor.value = inicial.empresa_id || $('filtroEmpresaPrecos').value || '';
+          if (!seletor.value) seletor.value = '';
+
+          form.elements.data_inicio.value = inicial.data_inicio || hojeTexto();
+          form.elements.data_fim.min = form.elements.data_inicio.value;
+
+          form.elements.data_inicio.addEventListener('change', function() {
+            form.elements.data_fim.min = form.elements.data_inicio.value;
+          });
+        },
+
+        aoEnviar: function(dados) {
+          if (!dados.empresa_id) throw new Error('Selecione a empresa.');
+          if (!dados.valor_unitario) throw new Error('Informe o valor da quentinha.');
+          if (!dados.data_inicio) throw new Error('Informe o início da vigência.');
+          return apiSessao('salvarPreco', dados);
+        },
+
+        depois: function(resposta) {
+          avisar(resposta.mensagem);
+          aplicarPrecosAtualizados(resposta);
+        }
+      });
+    })
+    .catch(function(erro) { avisar(erro.message, 'erro'); });
+}
+
+// ENCERRAR VIGÊNCIA
+function abrirEncerrarPreco(preco) {
+  abrirFormulario({
+    titulo: 'Encerrar vigência',
+    modelo: 'tplEncerrarPreco',
+    pequeno: true,
+
+    aoAbrir: function(form) {
+      form.querySelector('[data-descricao]').textContent =
+        preco.nome_empresa + ': ' + formatarMoeda(preco.valor_unitario) +
+        (preco.data_fim
+          ? ', de ' + formatarData(preco.data_inicio) + ' a ' + formatarData(preco.data_fim) + '.'
+          : ', vigente desde ' + formatarData(preco.data_inicio) + ', sem data final.');
+
+      form.elements.data_fim.min = preco.data_inicio;
+      form.elements.data_fim.value = preco.data_fim || '';
+    },
+
+    aoEnviar: function(dados) {
+      if (!dados.data_fim) throw new Error('Escolha o último dia de vigência.');
+      return apiSessao('encerrarPreco', preco.preco_id, dados.data_fim);
+    },
+
+    depois: function(resposta) {
+      avisar(resposta.mensagem);
+      aplicarPrecosAtualizados(resposta);
+
+      if (resposta.tem_sucessor) return;
+
+      confirmar({
+        titulo: 'Cadastrar o novo preço?',
+        mensagem: 'A partir de ' + formatarData(resposta.proximo_dia) + ', ' + preco.nome_empresa +
+          ' ficará sem preço. Quer cadastrar o novo valor agora?',
+        textoBotao: 'Cadastrar novo preço',
+        textoCancelar: 'Agora não'
+      }).then(function(sim) {
+        if (sim) abrirFormPreco({ empresa_id: resposta.empresa_id, data_inicio: resposta.proximo_dia });
+      });
+    }
+  });
+}
+
+// INATIVAR PREÇO
+function inativarPrecoComConfirmacao(preco, botao) {
+  confirmar({
+    titulo: 'Inativar este preço?',
+    mensagem: preco.nome_empresa + ': ' + formatarMoeda(preco.valor_unitario) + '. ' +
+      'Use apenas para corrigir um cadastro feito por engano. Pedidos já registrados mantêm o valor gravado neles.',
+    textoBotao: 'Inativar preço',
+    perigo: true
+  }).then(function(sim) {
+    if (!sim) return;
+
+    comCarregamento(botao, apiSessao('inativarPreco', preco.preco_id))
+      .then(function(resposta) {
+        avisar(resposta.mensagem);
+        aplicarPrecosAtualizados(resposta);
+      })
+      .catch(function(erro) { avisar(erro.message, 'erro'); });
+  });
+}
+
+// ----------------------------------------------------------------
+// FUNCIONÁRIOS (cadastro feito pelo restaurante)
+// ----------------------------------------------------------------
+let funcionariosConsulta = [];
+const funcionariosPorEmpresa = {}; // { empresa_id: { lista, em } }
+
+TELAS['funcionarios-admin'] = {
+  carregar: function() {
+    if (!empresasCarregadas) mostrarCarregandoLista($('listaFuncionariosAdmin'), 3);
+
+    garantirEmpresas()
+      .then(function() {
+        // Já abre na primeira empresa ativa, para a tela não ficar vazia
+        const seletor = $('filtroEmpresaFuncionarios');
+        if (!seletor.value) {
+          const primeira = empresas.find(function(e) { return e.status === 'ATIVO'; });
+          if (primeira) seletor.value = primeira.empresa_id;
+        }
+        carregarFuncionariosAdmin();
+      })
+      .catch(function(erro) {
+        mostrarErroLista($('listaFuncionariosAdmin'), erro.message, TELAS['funcionarios-admin'].carregar);
+      });
+  }
+};
+
+function carregarFuncionariosAdmin() {
+  const empresaId = $('filtroEmpresaFuncionarios').value;
+  const lista = $('listaFuncionariosAdmin');
+
+  $('contadorFuncionariosAdmin').textContent = '';
+
+  if (!empresaId) {
+    funcionariosConsulta = [];
+    lista.innerHTML = '';
+    lista.appendChild(estadoVazio({
+      icone: 'empresa',
+      titulo: empresas.length ? 'Selecione uma empresa' : 'Nenhuma empresa cadastrada',
+      texto: empresas.length
+        ? 'Escolha a empresa para ver e cadastrar os funcionários dela.'
+        : 'Cadastre uma empresa antes de cadastrar funcionários.'
+    }));
+    return;
+  }
+
+  const guardado = funcionariosPorEmpresa[empresaId];
+
+  if (guardado) {
+    funcionariosConsulta = guardado.lista;
+    renderizarFuncionariosAdmin();
+  } else {
+    mostrarCarregandoLista(lista);
+  }
+
+  if (guardado && recente(guardado.em)) return;
+
+  apiSessao('listarFuncionarios', empresaId)
+    .then(function(funcionarios) {
+      funcionariosPorEmpresa[empresaId] = { lista: funcionarios, em: Date.now() };
+      if ($('filtroEmpresaFuncionarios').value !== empresaId) return;
+      funcionariosConsulta = funcionarios;
+      renderizarFuncionariosAdmin();
+    })
+    .catch(function(erro) {
+      falhaAoAtualizar(lista, erro, carregarFuncionariosAdmin, !!guardado);
+    });
+}
+
+function renderizarFuncionariosAdmin() {
+  const empresaId = $('filtroEmpresaFuncionarios').value;
+  if (!empresaId) return;
+
+  const empresa = empresas.find(function(e) { return e.empresa_id === empresaId; });
+  const empresaAtiva = empresa && empresa.status === 'ATIVO';
+
+  const filtrados = filtrarFuncionarios(
+    funcionariosConsulta,
+    $('buscaFuncionariosAdmin').value,
+    $('filtroStatusFuncionariosAdmin').value
+  );
+  const ativos = funcionariosConsulta.filter(function(f) { return f.status === 'ATIVO'; }).length;
+
+  $('contadorFuncionariosAdmin').textContent = funcionariosConsulta.length
+    ? ativos + ' ativo(s) de ' + funcionariosConsulta.length + ' cadastrado(s).'
+    : '';
+
+  renderizarLista($('listaFuncionariosAdmin'), {
+    itens: filtrados,
+    apagada: function(f) { return f.status !== 'ATIVO'; },
+    vazio: funcionariosConsulta.length
+      ? { icone: 'busca', titulo: 'Nenhum funcionário encontrado', texto: 'Tente outra busca ou mude o filtro de situação.' }
+      : {
+          icone: 'pessoas',
+          titulo: 'Nenhum funcionário cadastrado',
+          texto: empresaAtiva
+            ? 'Cadastre as pessoas desta empresa que vão receber quentinhas.'
+            : 'Esta empresa está inativa.',
+          botao: empresaAtiva
+            ? criarBotao('Novo funcionário', {
+                classe: 'botao-primario', icone: 'adicionar',
+                aoClicar: function() { abrirFormFuncionario(); }
+              })
+            : null
+        },
+    colunas: colunasFuncionarios(),
+    larguraAcoes: '180px',
+    acoes: function(f) {
+      if (f.status !== 'ATIVO') {
+        const botoesInativo = [criarBotao('Reativar', {
+          classe: 'botao-secundario botao-pequeno',
+          aoClicar: function(evento) { alterarStatusFuncionario(f, true, evento.currentTarget); }
+        })];
+
+        // Só o proprietário apaga funcionários (o histórico fica nos relatórios)
+        if (estado.usuario.proprietario) {
+          botoesInativo.push(criarBotao('Apagar', {
+            classe: 'botao-fantasma botao-pequeno botao-texto-perigo',
+            aoClicar: function(evento) { apagarFuncionario(f, evento.currentTarget); }
+          }));
+        }
+        return botoesInativo;
+      }
+
+      return [
+        criarBotao('Editar', {
+          classe: 'botao-secundario botao-pequeno', icone: 'editar',
+          aoClicar: function() { abrirFormFuncionario(f); }
+        }),
+        criarBotao('Inativar', {
+          classe: 'botao-fantasma botao-pequeno botao-texto-perigo',
+          aoClicar: function(evento) { alterarStatusFuncionario(f, false, evento.currentTarget); }
+        })
+      ];
+    }
+  });
+}
+
+// APAGAR FUNCIONÁRIO (somente o proprietário; precisa estar inativo)
+function apagarFuncionario(f, botao) {
+  comCarregamento(botao, apiSessao('previaExclusaoFuncionario', f.funcionario_id))
+    .then(function(previa) {
+      let mensagem = 'Apagar ' + previa.nome + ' de vez? Ele some da lista de funcionários.';
+      if (previa.quentinhas) {
+        mensagem += ' As ' + previa.quentinhas + ' quentinha(s) dele continuam nos relatórios, com o nome dele.';
+      }
+      if (previa.pedidos_abertos) {
+        mensagem += ' Atenção: ele está em ' + previa.pedidos_abertos + ' pedido(s) de hoje em diante, que continuam valendo.';
+      }
+      mensagem += ' Esta ação não pode ser desfeita.';
+
+      return confirmar({ titulo: 'Apagar funcionário', mensagem: mensagem, textoBotao: 'Apagar', perigo: true })
+        .then(function(sim) {
+          if (!sim) return;
+          return comCarregamento(botao, apiSessao('excluirFuncionario', f.funcionario_id))
+            .then(function(resposta) {
+              const guardado = funcionariosPorEmpresa[f.empresa_id];
+              if (guardado) {
+                guardado.lista = guardado.lista.filter(function(x) { return x.funcionario_id !== resposta.funcionario_id; });
+              }
+              funcionariosConsulta = funcionariosConsulta.filter(function(x) { return x.funcionario_id !== resposta.funcionario_id; });
+              resumoAdmin = null;
+              renderizarFuncionariosAdmin();
+              avisar(resposta.mensagem, 'sucesso');
+            });
+        });
+    })
+    .catch(function(erro) { avisar(erro.message, 'erro'); });
+}
+
+$('filtroEmpresaFuncionarios').addEventListener('change', carregarFuncionariosAdmin);
+$('buscaFuncionariosAdmin').addEventListener('input', renderizarFuncionariosAdmin);
+$('filtroStatusFuncionariosAdmin').addEventListener('change', renderizarFuncionariosAdmin);
+$('botaoNovoFuncionarioAdmin').addEventListener('click', function() { abrirFormFuncionario(); });
+
+// Atualiza um funcionário na memória depois de uma gravação (sem nova consulta)
+function aplicarFuncionarioAtualizado(funcionario) {
+  if (!funcionario) return;
+
+  const guardado = funcionariosPorEmpresa[funcionario.empresa_id] || { lista: [], em: Date.now() };
+  substituirItem(guardado.lista, 'funcionario_id', funcionario);
+  ordenarPorNome(guardado.lista, 'nome');
+  funcionariosPorEmpresa[funcionario.empresa_id] = guardado;
+
+  // Atualiza o número de funcionários ativos da empresa
+  const empresa = empresas.find(function(e) { return e.empresa_id === funcionario.empresa_id; });
+  if (empresa) {
+    empresa.funcionarios_ativos = guardado.lista.filter(function(f) { return f.status === 'ATIVO'; }).length;
+  }
+
+  resumoAdmin = null;
+
+  if ($('filtroEmpresaFuncionarios').value === funcionario.empresa_id) {
+    funcionariosConsulta = guardado.lista;
+    if (estado.telaAtual === 'funcionarios-admin') renderizarFuncionariosAdmin();
+  }
+}
+
+// CADASTRAR OU EDITAR FUNCIONÁRIO
+function abrirFormFuncionario(funcionario) {
+  const editando = !!funcionario;
+  const ativas = empresas.filter(function(e) { return e.status === 'ATIVO'; });
+
+  if (!editando && !ativas.length) {
+    avisar('Cadastre uma empresa antes de cadastrar funcionários.', 'erro');
+    return;
+  }
+
+  let cadastrarOutro = false;
+
+  abrirFormulario({
+    titulo: editando ? 'Editar funcionário' : 'Novo funcionário',
+    modelo: 'tplFormFuncionario',
+    textoBotao: editando ? 'Salvar alterações' : 'Cadastrar',
+
+    aoAbrir: function(form) {
+      // Empresa: escolhida no cadastro; fixa na edição
+      const seletor = form.elements.empresa_id;
+      const opcoesEmpresas = editando
+        ? empresas.filter(function(e) { return e.empresa_id === funcionario.empresa_id; })
+        : ativas;
+
+      if (!editando) {
+        const vazio = el('option', '', 'Selecione a empresa');
+        vazio.value = '';
+        seletor.appendChild(vazio);
+      }
+
+      opcoesEmpresas.forEach(function(e) {
+        const opcao = el('option', '', e.nome_empresa);
+        opcao.value = e.empresa_id;
+        seletor.appendChild(opcao);
+      });
+
+      if (editando) {
+        seletor.value = funcionario.empresa_id;
+        seletor.disabled = true;
+      } else {
+        seletor.value = $('filtroEmpresaFuncionarios').value || '';
+        if (!seletor.value) seletor.value = '';
+      }
+
+      // Sugestões de setor a partir dos setores já usados na empresa
+      const lista = form.querySelector('datalist');
+
+      function atualizarSetores() {
+        lista.innerHTML = '';
+        const guardado = funcionariosPorEmpresa[seletor.value];
+        const setores = {};
+        (guardado ? guardado.lista : []).forEach(function(f) { if (f.setor) setores[f.setor] = true; });
+
+        Object.keys(setores)
+          .sort(function(a, b) { return a.localeCompare(b, 'pt-BR'); })
+          .forEach(function(setor) {
+            const opcao = el('option');
+            opcao.value = setor;
+            lista.appendChild(opcao);
+          });
+      }
+
+      atualizarSetores();
+      seletor.addEventListener('change', atualizarSetores);
+
+      if (editando) {
+        preencherFormulario(form, {
+          nome: funcionario.nome,
+          matricula: funcionario.matricula,
+          setor: funcionario.setor,
+          telefone: funcionario.telefone,
+          pode_alterar_quentinha: funcionario.pode_alterar_quentinha
+        });
+        return;
+      }
+
+      // Botão extra para cadastrar vários em sequência
+      const botaoOutro = criarBotao('Salvar e cadastrar outro', { classe: 'botao-secundario' });
+      botaoOutro.addEventListener('click', function() {
+        cadastrarOutro = true;
+        if (form.requestSubmit) {
+          form.requestSubmit();
+        } else {
+          form.dispatchEvent(new Event('submit', { cancelable: true }));
+        }
+      });
+
+      const enviar = form.querySelector('[data-enviar]');
+      enviar.parentElement.insertBefore(botaoOutro, enviar);
+    },
+
+    aoEnviar: function(dados, form) {
+      if (!editando && !dados.empresa_id) {
+        cadastrarOutro = false;
+        throw new Error('Selecione a empresa do funcionário.');
+      }
+
+      if (dados.nome.trim().length < 3) {
+        cadastrarOutro = false;
+        throw new Error('Informe o nome completo do funcionário.');
+      }
+
+      dados.funcionario_id = editando ? funcionario.funcionario_id : '';
+
+      return apiSessao('salvarFuncionario', dados)
+        .then(function(resposta) {
+          aplicarFuncionarioAtualizado(resposta.funcionario);
+
+          if (cadastrarOutro) {
+            cadastrarOutro = false;
+            avisar(resposta.mensagem);
+            const empresaEscolhida = form.elements.empresa_id.value;
+            const setor = form.elements.setor.value;
+            form.reset();
+            form.elements.empresa_id.value = empresaEscolhida; // mantém a empresa
+            form.elements.setor.value = setor;                 // e o setor, para agilizar
+            form.elements.nome.focus();
+            return false; // não fecha a janela
+          }
+
+          return resposta;
+        })
+        .catch(function(erro) {
+          cadastrarOutro = false;
+          throw erro;
+        });
+    },
+
+    depois: function(resposta) {
+      avisar(resposta.mensagem);
+    }
+  });
+}
+
+// INATIVAR OU REATIVAR FUNCIONÁRIO
+function alterarStatusFuncionario(funcionario, ativar, botao) {
+  const pergunta = ativar
+    ? Promise.resolve(true)
+    : confirmar({
+        titulo: 'Inativar ' + funcionario.nome + '?',
+        mensagem: 'Ele não aparecerá mais para novos pedidos. O histórico é mantido e você pode reativá-lo quando quiser.',
+        textoBotao: 'Inativar',
+        perigo: true
+      });
+
+  pergunta.then(function(sim) {
+    if (!sim) return;
+
+    comCarregamento(botao, apiSessao('alterarStatusFuncionario', funcionario.funcionario_id, ativar))
+      .then(function(resposta) {
+        avisar(resposta.mensagem);
+        aplicarFuncionarioAtualizado(resposta.funcionario);
+      })
+      .catch(function(erro) { avisar(erro.message, 'erro'); });
+  });
+}
+
+// ================================================================
+// ACESSOS DO RESTAURANTE (somente o proprietário)
+// Administradores entram com usuário + senha criada pelo convite
+// (e-mail opcional). O proprietário escolhe as abas e funções de cada um.
+// ================================================================
+let administradores = [];
+let administradoresEm = 0;
+let catalogoPermissoes = null;
+
+AO_SAIR.push(function() {
+  administradores = [];
+  administradoresEm = 0;
+  catalogoPermissoes = null;
+});
+
+TELAS['acessos'] = {
+  carregar: function() {
+    if (administradoresEm) renderizarAdministradores();
+    else mostrarCarregandoLista($('listaAdministradores'), 3);
+
+    if (recente(administradoresEm)) return;
+
+    apiSessao('obterAcessos')
+      .then(function(resposta) {
+        administradores = resposta.administradores;
+        catalogoPermissoes = resposta.catalogo;
+        administradoresEm = Date.now();
+        if (estado.telaAtual === 'acessos') renderizarAdministradores();
+      })
+      .catch(function(erro) {
+        falhaAoAtualizar($('listaAdministradores'), erro, TELAS['acessos'].carregar, !!administradoresEm);
+      });
+  }
+};
+
+// "Pedidos, Cardápios +2" — resumo curto das abas liberadas
+function resumoPermissoes(a) {
+  if (a.proprietario) return 'Acesso total';
+  if (!catalogoPermissoes || !a.permissoes) return '';
+  const abas = catalogoPermissoes.telas.filter(function(t) { return a.permissoes.telas[t.chave]; })
+    .map(function(t) { return t.titulo; });
+  if (!abas.length) return 'Só a tela inicial';
+  return abas.length > 3 ? abas.slice(0, 3).join(', ') + ' +' + (abas.length - 3) : abas.join(', ');
+}
+
+function renderizarAdministradores() {
+  const ativos = administradores.filter(function(a) { return a.status === 'ATIVO'; }).length;
+  $('contadorAdministradores').textContent = ativos + (ativos === 1 ? ' pessoa com acesso' : ' pessoas com acesso') +
+    (administradores.length > ativos ? ' · ' + (administradores.length - ativos) + ' desativado(s)' : '') + '.';
+
+  renderizarLista($('listaAdministradores'), {
+    itens: administradores,
+    apagada: function(a) { return a.status !== 'ATIVO'; },
+    colunas: [
+      { titulo: 'Administrador', largura: 'minmax(0, 1.6fr)', valor: function(a) {
+        const acesso = a.proprietario ? a.email : (a.login ? 'usuário ' + a.login : (a.email || 'sem usuário'));
+        return textoDuplo(a.nome + (a.usuario_id === estado.usuario.usuario_id ? ' (você)' : ''), acesso);
+      } },
+      { titulo: 'Pode acessar', largura: 'minmax(0, 1.6fr)', valor: function(a) {
+        return textoDuplo(a.proprietario ? 'Proprietário' : 'Administrador', resumoPermissoes(a));
+      } },
+      { titulo: 'Situação', largura: 'minmax(0, 1fr)', valor: function(a) {
+        if (a.status !== 'ATIVO') return criarEtiqueta('Desativado', 'cinza');
+        if (!a.ativado) {
+          return a.convite_expira ? criarEtiqueta('Aguardando 1º acesso', 'amarelo') : criarEtiqueta('Convite vencido', 'vermelho');
+        }
+        return criarEtiqueta('Ativo', 'verde');
+      } }
+    ],
+    larguraAcoes: '330px',
+    acoes: function(a) {
+      const botoes = [
+        criarBotao('Editar', {
+          classe: 'botao-secundario botao-pequeno', icone: 'editar',
+          aoClicar: function() { abrirFormAdministrador(a); }
+        })
+      ];
+
+      if (a.proprietario) return botoes;
+
+      if (a.status === 'ATIVO') {
+        botoes.push(criarBotao(a.ativado ? 'Nova senha' : 'Convite', {
+          classe: 'botao-secundario botao-pequeno', icone: 'convite',
+          titulo: a.ativado ? 'Gerar um link para a pessoa criar uma nova senha' : 'Enviar de novo o convite de primeiro acesso',
+          aoClicar: function(evento) { enviarConviteAdministrador(a, evento.currentTarget); }
+        }));
+        botoes.push(criarBotao('Desativar', {
+          classe: 'botao-fantasma botao-pequeno botao-texto-perigo',
+          aoClicar: function(evento) { alterarStatusAdministrador(a, false, evento.currentTarget); }
+        }));
+      } else {
+        botoes.push(criarBotao('Reativar', {
+          classe: 'botao-secundario botao-pequeno',
+          aoClicar: function(evento) { alterarStatusAdministrador(a, true, evento.currentTarget); }
+        }));
+        botoes.push(criarBotao('Excluir', {
+          classe: 'botao-fantasma botao-pequeno botao-texto-perigo',
+          aoClicar: function(evento) { excluirAdministrador(a, evento.currentTarget); }
+        }));
+      }
+
+      return botoes;
+    }
+  });
+}
+
+function aplicarAdministrador(atualizado) {
+  const indice = administradores.findIndex(function(a) { return a.usuario_id === atualizado.usuario_id; });
+
+  if (indice === -1) {
+    administradores.push(atualizado);
+  } else {
+    atualizado.data_cadastro = atualizado.data_cadastro || administradores[indice].data_cadastro;
+    administradores[indice] = atualizado;
+  }
+
+  administradores.sort(function(a, b) {
+    return (b.proprietario - a.proprietario) || a.nome.localeCompare(b.nome, 'pt-BR');
+  });
+  renderizarAdministradores();
+}
+
+$('botaoNovoAdministrador').addEventListener('click', function() { abrirFormAdministrador(); });
+
+// Caixas de marcar: cada aba, com as funções dela logo abaixo
+function montarPermissoes(caixa, permissoes) {
+  caixa.innerHTML = '';
+  const marcas = { telas: {}, funcoes: {} };
+
+  catalogoPermissoes.telas.forEach(function(tela) {
+    const bloco = el('div', 'permissao-aba');
+
+    const linha = el('label', 'opcao-checkbox');
+    const marcar = el('input');
+    marcar.type = 'checkbox';
+    marcar.checked = permissoes ? permissoes.telas[tela.chave] === true : tela.padrao;
+    marcas.telas[tela.chave] = marcar;
+    linha.appendChild(marcar);
+    const textos = el('div');
+    textos.appendChild(el('strong', '', tela.titulo));
+    textos.appendChild(el('span', '', tela.descricao));
+    linha.appendChild(textos);
+    bloco.appendChild(linha);
+
+    const funcoes = catalogoPermissoes.funcoes.filter(function(f) { return f.tela === tela.chave; });
+    if (funcoes.length) {
+      const sub = el('div', 'permissao-funcoes');
+      funcoes.forEach(function(funcao) {
+        const item = el('label', 'opcao-checkbox pequena');
+        const caixaFuncao = el('input');
+        caixaFuncao.type = 'checkbox';
+        caixaFuncao.checked = permissoes ? permissoes.funcoes[funcao.chave] === true : funcao.padrao;
+        marcas.funcoes[funcao.chave] = caixaFuncao;
+        item.appendChild(caixaFuncao);
+        item.appendChild(el('span', '', funcao.titulo));
+        sub.appendChild(item);
+      });
+      bloco.appendChild(sub);
+
+      const atualizar = function() {
+        sub.classList.toggle('desligada', !marcar.checked);
+        sub.querySelectorAll('input').forEach(function(i) { i.disabled = !marcar.checked; });
+      };
+      marcar.addEventListener('change', atualizar);
+      atualizar();
+    }
+
+    caixa.appendChild(bloco);
+  });
+
+  return function lerMarcas() {
+    const resultado = { telas: {}, funcoes: {} };
+    Object.keys(marcas.telas).forEach(function(k) { resultado.telas[k] = marcas.telas[k].checked; });
+    Object.keys(marcas.funcoes).forEach(function(k) { resultado.funcoes[k] = marcas.funcoes[k].checked && !marcas.funcoes[k].disabled; });
+    return resultado;
+  };
+}
+
+function abrirFormAdministrador(administrador) {
+  const editando = !!administrador;
+  const proprietario = editando && administrador.proprietario;
+  let lerPermissoes = null;
+
+  abrirFormulario({
+    titulo: editando ? 'Editar administrador' : 'Novo administrador',
+    modelo: 'tplFormAdministrador',
+    textoBotao: editando ? 'Salvar alterações' : 'Salvar e gerar convite',
+    pequeno: proprietario,
+    largo: !proprietario,
+
+    aoAbrir: function(form) {
+      preencherIcones(form);
+
+      if (proprietario) {
+        form.querySelectorAll('[data-somente-equipe], [data-somente-cadastro]').forEach(function(b) { b.remove(); });
+        form.elements.nome.value = administrador.nome;
+        return;
+      }
+
+      if (editando) {
+        form.querySelectorAll('[data-somente-cadastro]').forEach(function(b) { b.remove(); });
+        preencherFormulario(form, { nome: administrador.nome, login: administrador.login || '', email: administrador.email || '' });
+      }
+
+      // Sugere o usuário a partir do nome (até a pessoa mexer no campo)
+      let loginMexido = editando && !!administrador.login;
+      form.elements.login.addEventListener('input', function() { loginMexido = true; });
+      form.elements.nome.addEventListener('input', function() {
+        if (!loginMexido) form.elements.login.value = sugerirLogin(form.elements.nome.value);
+      });
+      if (editando && !administrador.login) form.elements.login.value = sugerirLogin(administrador.nome);
+
+      lerPermissoes = montarPermissoes(form.querySelector('[data-permissoes]'), editando ? administrador.permissoes : null);
+    },
+
+    aoEnviar: function(dados) {
+      if (!dados.nome.trim()) throw new Error('Informe o nome.');
+
+      if (proprietario) {
+        return apiSessao('editarAdministrador', { usuario_id: administrador.usuario_id, nome: dados.nome });
+      }
+
+      if (!String(dados.login || '').trim()) throw new Error('Informe o usuário de acesso.');
+      dados.permissoes = lerPermissoes();
+
+      if (editando) {
+        dados.usuario_id = administrador.usuario_id;
+        return apiSessao('editarAdministrador', dados);
+      }
+      return apiSessao('criarAdministrador', dados);
+    },
+
+    depois: function(resposta) {
+      aplicarAdministrador(resposta.administrador);
+
+      if (editando) {
+        avisar(resposta.mensagem, 'sucesso');
+        return;
+      }
+
+      mostrarConviteEmpresa(resposta.convite,
+        'Envie o convite para ' + resposta.administrador.nome + '. Pelo link, a pessoa cria a própria senha e já entra no painel.');
+    }
+  });
+}
+
+function enviarConviteAdministrador(administrador, botao) {
+  comCarregamento(botao, apiSessao('gerarConviteAdministrador', administrador.usuario_id))
+    .then(function(convite) {
+      mostrarConviteEmpresa(convite, convite.nova_senha
+        ? 'Envie este link para ' + administrador.nome + ' criar uma nova senha. A senha atual continua valendo até lá.'
+        : 'Envie o convite para ' + administrador.nome + ' criar a senha e fazer o primeiro acesso.');
+      administradoresEm = 0;   // atualiza a situação do convite na próxima vez
+    })
+    .catch(function(erro) { avisar(erro.message, 'erro'); });
+}
+
+function alterarStatusAdministrador(administrador, ativar, botao) {
+  const pergunta = ativar
+    ? Promise.resolve(true)
+    : confirmar({
+        titulo: 'Desativar ' + administrador.nome + '?',
+        mensagem: 'A pessoa sai do painel na hora e não consegue mais entrar. Você pode reativar quando quiser.',
+        textoBotao: 'Desativar acesso',
+        perigo: true
+      });
+
+  pergunta.then(function(sim) {
+    if (!sim) return;
+
+    comCarregamento(botao, apiSessao('alterarStatusAdministrador', administrador.usuario_id, ativar))
+      .then(function(resposta) {
+        aplicarAdministrador(resposta.administrador);
+        avisar(resposta.mensagem);
+      })
+      .catch(function(erro) { avisar(erro.message, 'erro'); });
+  });
+}
+
+function excluirAdministrador(administrador, botao) {
+  confirmar({
+    titulo: 'Excluir o acesso de ' + administrador.nome + '?',
+    mensagem: 'O acesso é apagado de vez. O que a pessoa já fez no sistema continua registrado.',
+    textoBotao: 'Excluir acesso',
+    perigo: true
+  }).then(function(sim) {
+    if (!sim) return;
+
+    comCarregamento(botao, apiSessao('excluirAdministrador', administrador.usuario_id))
+      .then(function(resposta) {
+        administradores = administradores.filter(function(a) { return a.usuario_id !== resposta.usuario_id; });
+        renderizarAdministradores();
+        avisar(resposta.mensagem);
+      })
+      .catch(function(erro) { avisar(erro.message, 'erro'); });
+  });
+}
+</script>

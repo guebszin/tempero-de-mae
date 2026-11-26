@@ -1,0 +1,890 @@
+<script>
+// ================================================================
+// SCRIPTCARDAPIOS.html — cardápio semanal
+// Restaurante: monta a semana (salva sozinho) e publica.
+// Empresa: consulta as semanas publicadas.
+// ================================================================
+
+const GRUPOS_CARDAPIO = [
+  { campo: 'acompanhamentos', titulo: 'Acompanhamento', exemplo: 'Ex.: Arroz' },
+  { campo: 'saladas', titulo: 'Salada', exemplo: 'Ex.: Alface' },
+  { campo: 'guarnicoes', titulo: 'Guarnição', exemplo: 'Ex.: Purê de batata' },
+  { campo: 'proteinas', titulo: 'Proteína', exemplo: 'Ex.: Frango assado', dica: 'o funcionário escolhe 1' }
+];
+
+const OPCAO_EXTRA_PADRAO = 'Ovo frito ou ovo cozido';
+const NOMES_DIAS_CURTOS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const NOMES_DIAS_LONGOS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+
+// ----------------------------------------------------------------
+// DATAS
+// ----------------------------------------------------------------
+function textoParaData(texto) {
+  const partes = String(texto).split('-').map(Number);
+  return new Date(partes[0], partes[1] - 1, partes[2]);
+}
+
+function somarDias(texto, dias) {
+  const data = textoParaData(texto);
+  data.setDate(data.getDate() + dias);
+  return dataParaTexto(data);
+}
+
+function segundaDe(texto) {
+  const data = textoParaData(texto);
+  const dia = data.getDay();
+  data.setDate(data.getDate() + (dia === 0 ? -6 : 1 - dia));
+  return dataParaTexto(data);
+}
+
+function rotuloSemana(segunda) {
+  const sexta = somarDias(segunda, 4);
+  return formatarData(segunda).slice(0, 5) + ' a ' + formatarData(sexta);
+}
+
+function rotuloRelativoSemana(segunda) {
+  const atual = segundaDe(hojeTexto());
+  if (segunda === atual) return 'Esta semana';
+  if (segunda === somarDias(atual, 7)) return 'Próxima semana';
+  if (segunda === somarDias(atual, -7)) return 'Semana passada';
+  return '';
+}
+
+function diaTemItens(dia) {
+  return GRUPOS_CARDAPIO.some(function(g) { return dia[g.campo] && dia[g.campo].length; });
+}
+
+const SITUACOES_SEMANA = {
+  PUBLICADO: { texto: 'Publicado', cor: 'verde' },
+  RASCUNHO: { texto: 'Rascunho', cor: 'amarela' },
+  VAZIA: { texto: 'Não montado', cor: 'cinza' }
+};
+
+// ----------------------------------------------------------------
+// VISUALIZAÇÃO SOMENTE LEITURA (empresa e tela inicial)
+// ----------------------------------------------------------------
+function renderizarDiaLeitura(dia, opcoes) {
+  opcoes = opcoes || {};
+  const cartao = el('div', 'dia-cardapio leitura' + (opcoes.hoje ? ' hoje' : '') + (opcoes.compacto ? ' compacto' : ''));
+
+  if (!opcoes.semCabecalho) {
+    const cabecalho = el('div', 'dia-cabecalho');
+    const textos = el('div');
+    const dataObj = textoParaData(dia.data);
+    textos.appendChild(el('strong', '', NOMES_DIAS_LONGOS[dataObj.getDay()]));
+    textos.appendChild(el('span', '', formatarData(dia.data).slice(0, 5)));
+    cabecalho.appendChild(textos);
+    if (opcoes.hoje) cabecalho.appendChild(criarEtiqueta('Hoje', 'verde'));
+    cartao.appendChild(cabecalho);
+  }
+
+  if (!diaTemItens(dia)) {
+    cartao.appendChild(el('div', 'dia-vazio', dia.observacoes || 'Cardápio não publicado.'));
+    return cartao;
+  }
+
+  GRUPOS_CARDAPIO.forEach(function(grupo) {
+    const itens = dia[grupo.campo] || [];
+    if (!itens.length) return;
+
+    const bloco = el('div', 'grupo-cardapio');
+    const titulo = el('div', 'grupo-titulo', grupo.titulo);
+    if (grupo.campo === 'proteinas' && itens.length > 1) titulo.appendChild(el('span', 'grupo-dica', ' · escolha 1'));
+    bloco.appendChild(titulo);
+
+    const lista = el('ul', 'lista-itens' + (grupo.campo === 'proteinas' ? ' proteinas' : ''));
+    itens.forEach(function(item) { lista.appendChild(el('li', '', item)); });
+    bloco.appendChild(lista);
+    cartao.appendChild(bloco);
+  });
+
+  if (dia.opcao_extra) {
+    const extra = el('div', 'opcao-extra-leitura');
+    const desenho = el('span');
+    desenho.innerHTML = icone('ovo');
+    extra.appendChild(desenho.firstChild);
+    extra.appendChild(el('span', '', 'Opcional, sem custo: ' + dia.opcao_extra));
+    cartao.appendChild(extra);
+  }
+
+  if (dia.observacoes) cartao.appendChild(el('div', 'dia-observacao', dia.observacoes));
+
+  return cartao;
+}
+
+// Cartão "Cardápio de hoje" na tela inicial da empresa
+function renderizarCardapioDestaque(destaque) {
+  const caixa = $('cardapioDestaqueEmpresa');
+  caixa.innerHTML = '';
+
+  if (!destaque) {
+    $('tituloCardapioDestaque').textContent = 'Cardápio';
+    $('subtituloCardapioDestaque').textContent = 'Publicado pelo restaurante.';
+    caixa.appendChild(criarAlerta('O cardápio desta semana ainda não foi publicado.', { tipo: 'info', icone: 'cardapio' }));
+    return;
+  }
+
+  const dataObj = textoParaData(destaque.dia.data);
+  $('tituloCardapioDestaque').textContent = destaque.e_hoje
+    ? 'Cardápio de hoje'
+    : 'Próximo cardápio: ' + NOMES_DIAS_LONGOS[dataObj.getDay()].toLowerCase();
+  $('subtituloCardapioDestaque').textContent = formatarData(destaque.dia.data);
+
+  caixa.appendChild(renderizarDiaLeitura(destaque.dia, { semCabecalho: true, compacto: true }));
+
+  caixa.appendChild(criarBotao('Ver a semana inteira', {
+    classe: 'botao-secundario botao-pequeno',
+    icone: 'calendario',
+    aoClicar: function() { irPara('cardapio-empresa'); }
+  }));
+}
+
+// Navegação entre semanas (‹ semana ›)
+function criarNavegacaoSemana(segunda, aoMudar) {
+  const nav = el('div', 'semana-nav');
+
+  const anterior = el('button', 'botao-icone');
+  anterior.type = 'button';
+  anterior.title = 'Semana anterior';
+  anterior.innerHTML = icone('anterior');
+  anterior.addEventListener('click', function() { aoMudar(somarDias(segunda, -7)); });
+
+  const proxima = el('button', 'botao-icone');
+  proxima.type = 'button';
+  proxima.title = 'Próxima semana';
+  proxima.innerHTML = icone('proximo');
+  proxima.addEventListener('click', function() { aoMudar(somarDias(segunda, 7)); });
+
+  const textos = el('div', 'semana-textos');
+  textos.appendChild(el('strong', '', rotuloSemana(segunda)));
+  const relativo = rotuloRelativoSemana(segunda);
+  textos.appendChild(el('span', '', relativo || 'Segunda a sexta'));
+
+  nav.appendChild(anterior);
+  nav.appendChild(textos);
+  nav.appendChild(proxima);
+
+  if (segunda !== segundaDe(hojeTexto())) {
+    const hoje = criarBotao('Esta semana', { classe: 'botao-fantasma botao-pequeno' });
+    hoje.addEventListener('click', function() { aoMudar(segundaDe(hojeTexto())); });
+    nav.appendChild(hoje);
+  }
+
+  return nav;
+}
+
+// ----------------------------------------------------------------
+// EMPRESA: CARDÁPIO DA SEMANA
+// ----------------------------------------------------------------
+const cardapioEmpresa = { segunda: null, semanas: {} };
+
+TELAS['cardapio-empresa'] = {
+  carregar: function(parametros) {
+    carregarCardapioEmpresa(parametros.segunda || cardapioEmpresa.segunda || segundaDe(hojeTexto()));
+  }
+};
+
+function carregarCardapioEmpresa(segunda) {
+  cardapioEmpresa.segunda = segunda;
+  const guardada = cardapioEmpresa.semanas[segunda];
+
+  if (guardada) {
+    renderizarCardapioEmpresa(guardada.semana);
+  } else {
+    $('cardapioEmpresaTopo').innerHTML = '';
+    $('cardapioEmpresaTopo').appendChild(criarNavegacaoSemana(segunda, carregarCardapioEmpresa));
+    mostrarCarregandoLista($('gradeCardapioEmpresa'), 3);
+  }
+
+  if (guardada && recente(guardada.em)) return;
+
+  apiSessao('obterCardapioEmpresa', segunda)
+    .then(function(semana) {
+      cardapioEmpresa.semanas[segunda] = { semana: semana, em: Date.now() };
+      if (estado.telaAtual === 'cardapio-empresa' && cardapioEmpresa.segunda === segunda) {
+        renderizarCardapioEmpresa(semana);
+      }
+    })
+    .catch(function(erro) {
+      falhaAoAtualizar($('gradeCardapioEmpresa'), erro, function() { carregarCardapioEmpresa(segunda); }, !!guardada);
+    });
+}
+
+function renderizarCardapioEmpresa(semana) {
+  const topo = $('cardapioEmpresaTopo');
+  const grade = $('gradeCardapioEmpresa');
+  const hoje = hojeTexto();
+
+  topo.innerHTML = '';
+  topo.appendChild(criarNavegacaoSemana(semana.segunda, carregarCardapioEmpresa));
+
+  grade.innerHTML = '';
+
+  if (semana.status === 'VAZIA') {
+    grade.appendChild(estadoVazio({
+      icone: 'cardapio',
+      titulo: 'Cardápio ainda não publicado',
+      texto: 'O restaurante ainda não publicou o cardápio desta semana.'
+    }));
+    return;
+  }
+
+  const lista = el('div', 'grade-cardapio');
+  semana.dias.forEach(function(dia) {
+    lista.appendChild(renderizarDiaLeitura(dia, { hoje: dia.data === hoje }));
+  });
+  grade.appendChild(lista);
+
+  rolarAteHoje(lista);
+}
+
+// No celular os dias ficam um embaixo do outro: abre já no dia de hoje
+function rolarAteHoje(lista) {
+  if (window.innerWidth > 900) return;
+  const cartaoHoje = lista.querySelector('.dia-cardapio.hoje');
+  if (cartaoHoje && cartaoHoje.previousElementSibling) {
+    setTimeout(function() {
+      const topo = cartaoHoje.getBoundingClientRect().top + window.scrollY - 70;
+      window.scrollTo({ top: topo, behavior: 'smooth' });
+    }, 50);
+  }
+}
+
+// ----------------------------------------------------------------
+// RESTAURANTE: MONTAR A SEMANA
+// ----------------------------------------------------------------
+const cardapioAdmin = {
+  segunda: null,
+  semana: null,
+  semanas: {},           // { segunda: { semana, em } }
+  frequentes: {},
+  alterado: false,
+  salvando: false,
+  pendente: false,
+  erro: false,
+  temporizador: null,
+  promessa: Promise.resolve()
+};
+
+TELAS['cardapios'] = {
+  carregar: function(parametros) {
+    abrirSemanaAdmin(parametros.segunda || cardapioAdmin.segunda || segundaDe(hojeTexto()));
+  },
+  aoSair: function() { salvarCardapioAgora(); }
+};
+
+// Ao sair: esquece as semanas carregadas
+AO_SAIR.push(function() {
+  cardapioEmpresa.segunda = null;
+  cardapioEmpresa.semanas = {};
+  clearTimeout(cardapioAdmin.temporizador);
+  cardapioAdmin.segunda = null;
+  cardapioAdmin.semana = null;
+  cardapioAdmin.semanas = {};
+  cardapioAdmin.frequentes = {};
+  cardapioAdmin.alterado = false;
+  cardapioAdmin.salvando = false;
+  cardapioAdmin.pendente = false;
+  cardapioAdmin.erro = false;
+  cardapioAdmin.promessa = Promise.resolve();
+});
+
+// Se a pessoa fechar a aba com alterações não salvas, o navegador pergunta
+window.addEventListener('beforeunload', function(evento) {
+  if (cardapioAdmin.alterado || cardapioAdmin.salvando) {
+    evento.preventDefault();
+    evento.returnValue = '';
+  }
+});
+
+function abrirSemanaAdmin(segunda) {
+  // Antes de trocar de semana, termina de salvar a atual
+  aguardarSalvamento().then(function() {
+    cardapioAdmin.segunda = segunda;
+    const guardada = cardapioAdmin.semanas[segunda];
+
+    if (guardada) {
+      cardapioAdmin.semana = guardada.semana;
+      renderizarSemanaAdmin();
+    } else {
+      cardapioAdmin.semana = null;
+      $('cardapioTopo').innerHTML = '';
+      $('cardapioTopo').appendChild(criarNavegacaoSemana(segunda, abrirSemanaAdmin));
+      mostrarCarregandoLista($('gradeCardapio'), 3);
+    }
+
+    if (guardada && recente(guardada.em)) return;
+
+    apiSessao('obterSemanaCardapio', segunda)
+      .then(function(semana) {
+        cardapioAdmin.frequentes = semana.itens_frequentes || {};
+        delete semana.itens_frequentes;
+        aplicarOpcaoExtraPadrao(semana);
+        cardapioAdmin.semanas[segunda] = { semana: semana, em: Date.now() };
+
+        // Não sobrescreve o que a pessoa já começou a editar
+        if (cardapioAdmin.segunda === segunda && !cardapioAdmin.alterado && !cardapioAdmin.salvando) {
+          cardapioAdmin.semana = semana;
+          if (estado.telaAtual === 'cardapios') renderizarSemanaAdmin();
+        }
+      })
+      .catch(function(erro) {
+        falhaAoAtualizar($('gradeCardapio'), erro, function() { abrirSemanaAdmin(segunda); }, !!guardada);
+      });
+  });
+}
+
+// Dias ainda não montados já vêm com o ovo marcado (oferecido todo dia)
+function aplicarOpcaoExtraPadrao(semana) {
+  semana.dias.forEach(function(dia) {
+    if (!dia.existe && !dia.opcao_extra) dia.opcao_extra = OPCAO_EXTRA_PADRAO;
+  });
+}
+
+// ---------- SALVAMENTO AUTOMÁTICO ----------
+function marcarAlterado() {
+  cardapioAdmin.alterado = true;
+  cardapioAdmin.erro = false;
+  mostrarEstadoSalvamento('pendente');
+
+  clearTimeout(cardapioAdmin.temporizador);
+  cardapioAdmin.temporizador = setTimeout(salvarCardapioAgora, 1200);
+}
+
+function salvarCardapioAgora() {
+  clearTimeout(cardapioAdmin.temporizador);
+
+  if (!cardapioAdmin.alterado || !cardapioAdmin.semana) return cardapioAdmin.promessa;
+
+  if (cardapioAdmin.salvando) {
+    cardapioAdmin.pendente = true;
+    return cardapioAdmin.promessa;
+  }
+
+  const semana = cardapioAdmin.semana;
+  const dias = semana.dias.map(function(dia) {
+    return {
+      acompanhamentos: dia.acompanhamentos,
+      saladas: dia.saladas,
+      guarnicoes: dia.guarnicoes,
+      proteinas: dia.proteinas,
+      opcao_extra: dia.opcao_extra,
+      observacoes: dia.observacoes
+    };
+  });
+
+  cardapioAdmin.alterado = false;
+  cardapioAdmin.salvando = true;
+  mostrarEstadoSalvamento('salvando');
+
+  cardapioAdmin.promessa = apiSessao('salvarSemanaCardapio', semana.segunda, dias, semana.versao)
+    .then(function(resposta) {
+      if (resposta.versao) semana.versao = resposta.versao;
+
+      // Dias salvos passam a existir na planilha
+      semana.dias.forEach(function(dia) {
+        if (diaTemItens(dia) || dia.observacoes) dia.existe = true;
+      });
+
+      if (semana.status === 'VAZIA') semana.status = resposta.status;
+      cardapioAdmin.semanas[semana.segunda] = { semana: semana, em: Date.now() };
+
+      if (!cardapioAdmin.alterado) mostrarEstadoSalvamento('salvo');
+      if (cardapioAdmin.semana === semana) atualizarEtiquetaSituacao();
+      if (typeof resumoAdmin !== 'undefined') resumoAdmin = null;
+    })
+    .catch(function(erro) {
+      // Outra tela salvou esta semana: carrega a versão nova em vez de sobrescrever
+      if (/outra tela/.test(erro.message)) {
+        cardapioAdmin.alterado = false;
+        cardapioAdmin.pendente = false;
+        cardapioAdmin.erro = false;
+        delete cardapioAdmin.semanas[semana.segunda];
+        mostrarEstadoSalvamento('salvo');
+        avisar(erro.message, 'erro');
+
+        if (cardapioAdmin.semana === semana) {
+          cardapioAdmin.semana = null;
+          setTimeout(function() { abrirSemanaAdmin(semana.segunda); }, 0);
+        }
+        return;
+      }
+
+      cardapioAdmin.alterado = true;
+      cardapioAdmin.erro = true;
+      mostrarEstadoSalvamento('erro');
+      avisar('Não foi possível salvar o cardápio: ' + erro.message, 'erro');
+    })
+    .finally(function() {
+      cardapioAdmin.salvando = false;
+
+      if (cardapioAdmin.pendente) {
+        cardapioAdmin.pendente = false;
+        if (!cardapioAdmin.erro) return salvarCardapioAgora();
+      }
+    });
+
+  return cardapioAdmin.promessa;
+}
+
+// Espera tudo ser salvo (para trocar de semana ou publicar)
+function aguardarSalvamento() {
+  return salvarCardapioAgora().then(function() {
+    if (cardapioAdmin.erro) return;
+    if (cardapioAdmin.salvando || cardapioAdmin.alterado) return aguardarSalvamento();
+  });
+}
+
+function mostrarEstadoSalvamento(situacao) {
+  const indicador = document.getElementById('estadoSalvamentoCardapio');
+  if (!indicador) return;
+
+  const textos = {
+    pendente: 'Alterações não salvas…',
+    salvando: 'Salvando…',
+    salvo: 'Todas as alterações foram salvas',
+    erro: 'Erro ao salvar — tente de novo'
+  };
+
+  indicador.className = 'estado-salvamento ' + situacao;
+  indicador.textContent = textos[situacao] || '';
+}
+
+// ---------- TOPO: navegação, situação e ações ----------
+function renderizarSemanaAdmin() {
+  const semana = cardapioAdmin.semana;
+  const topo = $('cardapioTopo');
+  topo.innerHTML = '';
+
+  topo.appendChild(criarNavegacaoSemana(semana.segunda, abrirSemanaAdmin));
+
+  const situacao = el('div', 'cardapio-situacao');
+  situacao.id = 'situacaoCardapio';
+  topo.appendChild(situacao);
+
+  const indicador = el('span', 'estado-salvamento');
+  indicador.id = 'estadoSalvamentoCardapio';
+  topo.appendChild(indicador);
+
+  const acoes = el('div', 'cardapio-acoes');
+
+  acoes.appendChild(criarBotao('Copiar semana anterior', {
+    classe: 'botao-secundario', icone: 'copiar',
+    aoClicar: function(evento) { copiarSemanaAnterior(evento.currentTarget); }
+  }));
+
+  const botaoPublicar = criarBotao('', { classe: 'botao-primario' });
+  botaoPublicar.id = 'botaoPublicarCardapio';
+  botaoPublicar.addEventListener('click', function() { alternarPublicacao(botaoPublicar); });
+  acoes.appendChild(botaoPublicar);
+
+  topo.appendChild(acoes);
+
+  atualizarEtiquetaSituacao();
+  mostrarEstadoSalvamento(cardapioAdmin.alterado ? 'pendente' : (cardapioAdmin.erro ? 'erro' : ''));
+
+  // Listas de sugestões para os campos de digitação
+  let listas = document.getElementById('listasItensCardapio');
+  if (!listas) {
+    listas = el('div');
+    listas.id = 'listasItensCardapio';
+    document.body.appendChild(listas);
+  }
+  listas.innerHTML = '';
+  GRUPOS_CARDAPIO.forEach(function(grupo) {
+    const datalist = el('datalist');
+    datalist.id = 'itens-' + grupo.campo;
+    (cardapioAdmin.frequentes[grupo.campo] || []).forEach(function(item) {
+      const opcao = el('option');
+      opcao.value = item;
+      datalist.appendChild(opcao);
+    });
+    listas.appendChild(datalist);
+  });
+
+  const grade = $('gradeCardapio');
+  grade.innerHTML = '';
+
+  const nota = el('div', 'nota');
+  nota.textContent = semana.status === 'PUBLICADO'
+    ? 'Esta semana está publicada: as alterações são salvas sozinhas e aparecem na hora para as empresas.'
+    : 'As alterações são salvas sozinhas. As empresas só veem o cardápio depois que você clicar em "Publicar semana".';
+  grade.appendChild(nota);
+
+  const lista = el('div', 'grade-cardapio');
+  lista.id = 'listaDiasCardapio';
+  semana.dias.forEach(function(dia, indice) { lista.appendChild(criarDiaEditavel(indice)); });
+  grade.appendChild(lista);
+  rolarAteHoje(lista);
+}
+
+function atualizarEtiquetaSituacao() {
+  const caixa = document.getElementById('situacaoCardapio');
+  const botao = document.getElementById('botaoPublicarCardapio');
+  if (!caixa || !botao) return;
+
+  const semana = cardapioAdmin.semana;
+  const situacao = SITUACOES_SEMANA[semana.status] || SITUACOES_SEMANA.VAZIA;
+
+  caixa.innerHTML = '';
+  caixa.appendChild(criarEtiqueta(situacao.texto, situacao.cor));
+
+  botao.innerHTML = '';
+  if (semana.status === 'PUBLICADO') {
+    botao.className = 'botao botao-secundario';
+    botao.textContent = 'Voltar para rascunho';
+  } else {
+    botao.className = 'botao botao-primario';
+    botao.innerHTML = icone('publicar');
+    botao.appendChild(document.createTextNode('Publicar semana'));
+  }
+}
+
+// ---------- CARTÃO DE UM DIA ----------
+function criarDiaEditavel(indice) {
+  const dia = cardapioAdmin.semana.dias[indice];
+  const dataObj = textoParaData(dia.data);
+  const hoje = dia.data === hojeTexto();
+
+  const cartao = el('div', 'dia-cardapio' + (hoje ? ' hoje' : ''));
+  cartao.dataset.indice = indice;
+
+  // Cabeçalho
+  const cabecalho = el('div', 'dia-cabecalho');
+  const textos = el('div');
+  textos.appendChild(el('strong', '', NOMES_DIAS_LONGOS[dataObj.getDay()]));
+  textos.appendChild(el('span', '', formatarData(dia.data).slice(0, 5) + (hoje ? ' · hoje' : '')));
+  cabecalho.appendChild(textos);
+
+  const acoes = el('div', 'dia-acoes');
+
+  if (indice > 0) {
+    const copiar = el('button', 'botao-icone pequeno');
+    copiar.type = 'button';
+    copiar.title = 'Copiar o cardápio de ' + NOMES_DIAS_LONGOS[textoParaData(cardapioAdmin.semana.dias[indice - 1].data).getDay()].toLowerCase();
+    copiar.innerHTML = icone('copiar');
+    copiar.addEventListener('click', function() { copiarDiaAnterior(indice); });
+    acoes.appendChild(copiar);
+  }
+
+  const limpar = el('button', 'botao-icone pequeno');
+  limpar.type = 'button';
+  limpar.title = 'Limpar este dia';
+  limpar.innerHTML = icone('lixeira');
+  limpar.addEventListener('click', function() { limparDia(indice); });
+  acoes.appendChild(limpar);
+
+  cabecalho.appendChild(acoes);
+  cartao.appendChild(cabecalho);
+
+  // Grupos
+  GRUPOS_CARDAPIO.forEach(function(grupo) {
+    cartao.appendChild(criarGrupoEditavel(indice, grupo));
+  });
+
+  // Opção extra (gratuita)
+  const extra = el('div', 'grupo-cardapio');
+  const tituloExtra = el('div', 'grupo-titulo', 'Opção extra');
+  tituloExtra.appendChild(el('span', 'grupo-dica', ' · opcional, sem custo'));
+  extra.appendChild(tituloExtra);
+
+  const linhaExtra = el('label', 'extra-linha');
+  const marcar = el('input');
+  marcar.type = 'checkbox';
+  marcar.checked = !!dia.opcao_extra;
+
+  const textoExtra = el('input', 'campo-item');
+  textoExtra.value = dia.opcao_extra || OPCAO_EXTRA_PADRAO;
+  textoExtra.disabled = !dia.opcao_extra;
+  textoExtra.maxLength = 80;
+
+  marcar.addEventListener('change', function() {
+    textoExtra.disabled = !marcar.checked;
+    dia.opcao_extra = marcar.checked ? (textoExtra.value.trim() || OPCAO_EXTRA_PADRAO) : '';
+    marcarAlterado();
+  });
+
+  textoExtra.addEventListener('input', function() {
+    dia.opcao_extra = textoExtra.value.trim();
+    marcarAlterado();
+  });
+
+  linhaExtra.appendChild(marcar);
+  linhaExtra.appendChild(textoExtra);
+  extra.appendChild(linhaExtra);
+  cartao.appendChild(extra);
+
+  // Observação
+  const observacao = el('input', 'campo-item observacao');
+  observacao.placeholder = 'Observação (ex.: feriado, sem atendimento)';
+  observacao.maxLength = 200;
+  observacao.value = dia.observacoes || '';
+  observacao.addEventListener('input', function() {
+    dia.observacoes = observacao.value;
+    marcarAlterado();
+  });
+  cartao.appendChild(observacao);
+
+  return cartao;
+}
+
+function criarGrupoEditavel(indice, grupo) {
+  const dia = cardapioAdmin.semana.dias[indice];
+  const itens = dia[grupo.campo];
+
+  const bloco = el('div', 'grupo-cardapio');
+  bloco.dataset.grupo = grupo.campo;
+  const titulo = el('div', 'grupo-titulo', grupo.titulo);
+  if (grupo.dica) titulo.appendChild(el('span', 'grupo-dica', ' · ' + grupo.dica));
+  bloco.appendChild(titulo);
+
+  // Itens já escolhidos
+  const chips = el('div', 'chips');
+  itens.forEach(function(item, posicao) {
+    const chip = el('span', 'chip' + (grupo.campo === 'proteinas' ? ' destaque' : ''));
+    chip.appendChild(el('span', '', item));
+
+    const remover = el('button');
+    remover.type = 'button';
+    remover.title = 'Remover ' + item;
+    remover.innerHTML = icone('fechar');
+    remover.addEventListener('click', function() {
+      itens.splice(posicao, 1);
+      atualizarDia(indice, grupo.campo);
+    });
+
+    chip.appendChild(remover);
+    chips.appendChild(chip);
+  });
+  bloco.appendChild(chips);
+
+  // Campo para digitar (Enter ou vírgula adiciona)
+  const campo = el('input', 'campo-item');
+  campo.placeholder = itens.length ? 'Adicionar…' : grupo.exemplo;
+  campo.setAttribute('list', 'itens-' + grupo.campo);
+  campo.maxLength = 80;
+
+  // manterFoco: continua digitando no mesmo campo depois de adicionar
+  function adicionarDigitado(manterFoco) {
+    const partes = campo.value.split(',').map(function(p) { return p.trim(); }).filter(Boolean);
+    if (!partes.length) return;
+    partes.forEach(function(parte) { adicionarItem(indice, grupo.campo, parte); });
+    campo.value = '';
+    atualizarDia(indice, manterFoco ? grupo.campo : null);
+  }
+
+  campo.addEventListener('keydown', function(evento) {
+    if (evento.key === 'Enter' || evento.key === ',') {
+      evento.preventDefault();
+      adicionarDigitado(true);
+    }
+  });
+
+  // Escolher da lista de sugestões do navegador também adiciona
+  campo.addEventListener('change', function() {
+    const escolhido = campo.value.trim();
+    const frequentes = cardapioAdmin.frequentes[grupo.campo] || [];
+    if (escolhido && frequentes.indexOf(escolhido) !== -1) adicionarDigitado(true);
+  });
+
+  campo.addEventListener('blur', function() {
+    if (campo.value.trim()) adicionarDigitado(false);
+  });
+
+  bloco.appendChild(campo);
+
+  // Sugestões de um clique (itens frequentes que ainda não estão no dia)
+  const jaTem = itens.map(normalizarBusca);
+  const sugestoes = (cardapioAdmin.frequentes[grupo.campo] || [])
+    .filter(function(item) { return jaTem.indexOf(normalizarBusca(item)) === -1; })
+    .slice(0, grupo.campo === 'acompanhamentos' || grupo.campo === 'saladas' ? 6 : 4);
+
+  if (sugestoes.length) {
+    const caixa = el('div', 'sugestoes');
+    sugestoes.forEach(function(item) {
+      const botao = el('button', 'sugestao', '+ ' + item);
+      botao.type = 'button';
+      botao.addEventListener('mousedown', function(evento) { evento.preventDefault(); });
+      botao.addEventListener('click', function() {
+        adicionarItem(indice, grupo.campo, item);
+        atualizarDia(indice, grupo.campo);
+      });
+      caixa.appendChild(botao);
+    });
+    bloco.appendChild(caixa);
+  }
+
+  return bloco;
+}
+
+function adicionarItem(indice, campo, texto) {
+  const itens = cardapioAdmin.semana.dias[indice][campo];
+  texto = texto.trim().replace(/\s+/g, ' ');
+  if (!texto) return;
+
+  // Primeira letra maiúscula, sem repetir itens
+  texto = texto.charAt(0).toUpperCase() + texto.slice(1);
+  const existe = itens.some(function(item) { return normalizarBusca(item) === normalizarBusca(texto); });
+
+  if (!existe && itens.length < 15) itens.push(texto);
+}
+
+// Redesenha só o cartão do dia alterado e salva
+function atualizarDia(indice, focarGrupo) {
+  const lista = $('listaDiasCardapio');
+  const antigo = lista.querySelector('[data-indice="' + indice + '"]');
+  const novo = criarDiaEditavel(indice);
+  lista.replaceChild(novo, antigo);
+
+  // Foca na hora (sem esperar), para não perder letras de quem digita rápido
+  if (focarGrupo) {
+    const campo = novo.querySelector('[data-grupo="' + focarGrupo + '"] input.campo-item');
+    if (campo) campo.focus();
+  }
+
+  marcarAlterado();
+}
+
+function copiarConteudoDia(origem, destino) {
+  GRUPOS_CARDAPIO.forEach(function(grupo) { destino[grupo.campo] = origem[grupo.campo].slice(); });
+  destino.opcao_extra = origem.opcao_extra;
+  destino.observacoes = origem.observacoes;
+}
+
+function copiarDiaAnterior(indice) {
+  const dias = cardapioAdmin.semana.dias;
+  const destino = dias[indice];
+
+  const executar = function() {
+    copiarConteudoDia(dias[indice - 1], destino);
+    atualizarDia(indice);
+  };
+
+  if (!diaTemItens(destino)) {
+    executar();
+    return;
+  }
+
+  confirmar({
+    titulo: 'Substituir este dia?',
+    mensagem: 'O cardápio atual de ' + NOMES_DIAS_LONGOS[textoParaData(destino.data).getDay()].toLowerCase() +
+      ' será trocado pelo do dia anterior.',
+    textoBotao: 'Substituir'
+  }).then(function(sim) { if (sim) executar(); });
+}
+
+function limparDia(indice) {
+  const dia = cardapioAdmin.semana.dias[indice];
+
+  if (!diaTemItens(dia) && !dia.observacoes) return;
+
+  confirmar({
+    titulo: 'Limpar ' + NOMES_DIAS_LONGOS[textoParaData(dia.data).getDay()].toLowerCase() + '?',
+    mensagem: 'Todos os itens deste dia serão removidos.',
+    textoBotao: 'Limpar dia',
+    perigo: true
+  }).then(function(sim) {
+    if (!sim) return;
+    GRUPOS_CARDAPIO.forEach(function(grupo) { dia[grupo.campo] = []; });
+    dia.opcao_extra = OPCAO_EXTRA_PADRAO;
+    dia.observacoes = '';
+    atualizarDia(indice);
+  });
+}
+
+// ---------- COPIAR A SEMANA ANTERIOR ----------
+function copiarSemanaAnterior(botao) {
+  const semana = cardapioAdmin.semana;
+  const anterior = somarDias(semana.segunda, -7);
+  const temConteudo = semana.dias.some(diaTemItens);
+
+  const pergunta = temConteudo
+    ? confirmar({
+        titulo: 'Substituir esta semana?',
+        mensagem: 'O cardápio desta semana será trocado pelo da semana de ' + rotuloSemana(anterior) + '.',
+        textoBotao: 'Substituir'
+      })
+    : Promise.resolve(true);
+
+  pergunta.then(function(sim) {
+    if (!sim) return;
+
+    comCarregamento(botao, apiSessao('obterSemanaCardapio', anterior))
+      .then(function(semanaAnterior) {
+        if (!semanaAnterior.dias.some(diaTemItens)) {
+          avisar('A semana anterior está vazia. Não há o que copiar.', 'erro');
+          return;
+        }
+
+        semana.dias.forEach(function(dia, i) { copiarConteudoDia(semanaAnterior.dias[i], dia); });
+        renderizarSemanaAdmin();
+        marcarAlterado();
+        avisar('Semana copiada. Agora é só ajustar o que muda.');
+      })
+      .catch(function(erro) { avisar(erro.message, 'erro'); });
+  });
+}
+
+// ---------- PUBLICAR / VOLTAR PARA RASCUNHO ----------
+function alternarPublicacao(botao) {
+  const semana = cardapioAdmin.semana;
+  const publicar = semana.status !== 'PUBLICADO';
+
+  if (publicar) {
+    const comItens = semana.dias.filter(diaTemItens);
+
+    if (!comItens.length) {
+      avisar('A semana está vazia. Monte o cardápio antes de publicar.', 'erro');
+      return;
+    }
+
+    const semProteina = comItens.filter(function(dia) { return !dia.proteinas.length; });
+
+    if (semProteina.length) {
+      avisar('Informe pelo menos uma proteína em: ' + semProteina.map(function(dia) {
+        return NOMES_DIAS_LONGOS[textoParaData(dia.data).getDay()];
+      }).join(', ') + '.', 'erro');
+      return;
+    }
+  }
+
+  const vazios = semana.dias.filter(function(dia) { return !diaTemItens(dia); });
+  const nomesVazios = vazios.map(function(dia) { return NOMES_DIAS_LONGOS[textoParaData(dia.data).getDay()]; });
+
+  const pergunta = publicar
+    ? confirmar({
+        titulo: 'Publicar o cardápio?',
+        mensagem: 'As empresas passarão a ver o cardápio de ' + rotuloSemana(semana.segunda) + '.' +
+          (vazios.length ? ' Atenção: ' + nomesVazios.join(', ') + (vazios.length > 1 ? ' estão sem cardápio.' : ' está sem cardápio.') : ''),
+        textoBotao: 'Publicar'
+      })
+    : confirmar({
+        titulo: 'Voltar para rascunho?',
+        mensagem: 'As empresas deixarão de ver o cardápio desta semana até você publicar de novo.',
+        textoBotao: 'Voltar para rascunho'
+      });
+
+  pergunta.then(function(sim) {
+    if (!sim) return;
+
+    const tarefa = aguardarSalvamento().then(function() {
+      if (cardapioAdmin.erro) throw new Error('Corrija o erro de salvamento antes de publicar.');
+      return apiSessao('publicarSemanaCardapio', semana.segunda, publicar);
+    });
+
+    comCarregamento(botao, tarefa)
+      .then(function(resposta) {
+        cardapioAdmin.frequentes = resposta.semana.itens_frequentes || cardapioAdmin.frequentes;
+        delete resposta.semana.itens_frequentes;
+        aplicarOpcaoExtraPadrao(resposta.semana);
+        cardapioAdmin.semana = resposta.semana;
+        cardapioAdmin.semanas[resposta.semana.segunda] = { semana: resposta.semana, em: Date.now() };
+        if (typeof resumoAdmin !== 'undefined') resumoAdmin = null;
+        renderizarSemanaAdmin();
+        mostrarEstadoSalvamento('salvo');
+        avisar(resposta.mensagem);
+      })
+      .catch(function(erro) { avisar(erro.message, 'erro'); });
+  });
+}
+</script>

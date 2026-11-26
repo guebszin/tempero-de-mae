@@ -1,0 +1,54 @@
+name: Publicar no Apps Script
+
+# Só roda quando alguém clica em "Run workflow" na aba Actions.
+on:
+  workflow_dispatch:
+    inputs:
+      descricao:
+        description: 'Descrição da nova versão'
+        required: true
+
+env:
+  ID_IMPLANTACAO: AKfycbzjFyTv6So_5jGqcm1yUgIzOG_3Z1fg2RgHpFeXkmjxSgXUWXMlPXIz-bwW3-jAkNO0zQ
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install playwright
+      - run: bash testes/rodar_todos.sh
+
+  publicar:
+    needs: testes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Instalar clasp
+        run: npm install
+
+      - name: Credenciais do clasp
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          if [ -z "$CLASPRC_JSON" ]; then
+            echo "Falta o segredo CLASPRC_JSON (veja docs/PUBLICAR.md)"; exit 1
+          fi
+          printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
+
+      - name: Enviar código
+        run: npx clasp push --force
+
+      - name: Nova versão no mesmo endereço
+        env:
+          DESCRICAO: ${{ github.event.inputs.descricao }}
+        run: npx clasp deploy --deploymentId "$ID_IMPLANTACAO" --description "$DESCRICAO"

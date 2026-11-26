@@ -1,0 +1,1063 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Tempero de Mãe</title>
+  <meta name="color-scheme" content="light dark">
+  <script>
+    // Aplica o tema antes de desenhar a página (evita piscar claro→escuro)
+    (function() {
+      var tema = 'auto';
+      try { tema = localStorage.getItem('tema') || 'auto'; } catch (erro) {}
+      var escuro = tema === 'escuro' ||
+        (tema === 'auto' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.setAttribute('data-tema', escuro ? 'escuro' : 'claro');
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <?!= incluir('Estilos'); ?>
+</head>
+
+<body>
+
+<!-- ============================================================
+     CARREGAMENTO INICIAL
+     ============================================================ -->
+<div id="telaCarregando" class="tela-carregando">
+  <div class="carregando-centro">
+    <div class="spinner"></div>
+    <p class="carregando-texto" id="textoCarregando"></p>
+  </div>
+</div>
+
+<!-- ============================================================
+     LOGIN
+     ============================================================ -->
+<div id="telaLogin" class="tela-login" hidden>
+  <div class="fundo-animado" aria-hidden="true" data-fundo-animado></div>
+  <div class="login-card">
+
+    <div class="marca">
+      <span class="marca-icone" data-icone="marca"></span>
+      Tempero de Mãe
+    </div>
+
+    <h1>Entrar</h1>
+    <p class="texto-apoio">Use o usuário e a senha cadastrados.</p>
+
+    <form id="formLogin" novalidate>
+      <div id="erroLogin" class="mensagem-erro" hidden></div>
+
+      <div class="campo">
+        <label for="loginEmail">Usuário</label>
+        <input id="loginEmail" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Seu usuário" required>
+      </div>
+
+      <div class="campo">
+        <label for="loginSenha">Senha</label>
+        <div class="campo-senha">
+          <input id="loginSenha" type="password" autocomplete="current-password" placeholder="Sua senha" required>
+          <button type="button" class="botao-icone" data-mostrar-senha="loginSenha" title="Mostrar senha" data-icone="olho"></button>
+        </div>
+      </div>
+
+      <label class="lembrar-login">
+        <input id="loginLembrar" type="checkbox" checked>
+        <span>Manter conectado neste aparelho</span>
+      </label>
+
+      <button type="submit" class="botao botao-primario botao-largo">Entrar</button>
+    </form>
+
+    <p class="login-ajuda">Esqueceu a senha? Fale com o restaurante.</p>
+
+    <div class="bloco-tema" data-seletor-tema></div>
+  </div>
+</div>
+
+<!-- ============================================================
+     PRIMEIRO ACESSO (link de convite)
+     ============================================================ -->
+<div id="telaConvite" class="tela-login" hidden>
+  <div class="fundo-animado" aria-hidden="true" data-fundo-animado></div>
+  <div class="login-card">
+
+    <div class="marca">
+      <span class="marca-icone" data-icone="marca"></span>
+      Tempero de Mãe
+    </div>
+
+    <div id="conviteCarregando" class="texto-apoio">Abrindo o convite…</div>
+
+    <div id="conviteInvalido" hidden>
+      <h1>Convite indisponível</h1>
+      <p class="texto-apoio" id="conviteInvalidoTexto"></p>
+      <button type="button" class="botao botao-primario botao-largo" id="conviteIrLogin">Ir para o login</button>
+    </div>
+
+    <form id="formConvite" novalidate hidden>
+      <h1 id="conviteTitulo">Crie sua senha</h1>
+      <p class="texto-apoio" id="conviteTexto"></p>
+
+      <div class="convite-usuario">
+        <span>Seu usuário</span>
+        <strong id="conviteUsuario"></strong>
+      </div>
+
+      <div id="erroConvite" class="mensagem-erro" hidden></div>
+
+      <div class="campo">
+        <label for="conviteSenha">Nova senha</label>
+        <div class="campo-senha">
+          <input id="conviteSenha" type="password" autocomplete="new-password" placeholder="Mínimo de 6 caracteres" required>
+          <button type="button" class="botao-icone" data-mostrar-senha="conviteSenha" title="Mostrar senha" data-icone="olho"></button>
+        </div>
+      </div>
+
+      <div class="campo">
+        <label for="conviteConfirmacao">Repita a senha</label>
+        <input id="conviteConfirmacao" type="password" autocomplete="new-password" required>
+      </div>
+
+      <label class="lembrar-login">
+        <input id="conviteLembrar" type="checkbox" checked>
+        <span>Manter conectado neste aparelho</span>
+      </label>
+
+      <button type="submit" class="botao botao-primario botao-largo">Criar senha e entrar</button>
+    </form>
+
+    <p class="login-ajuda">Guarde o seu usuário: é com ele e a nova senha que você vai entrar.</p>
+
+    <div class="bloco-tema" data-seletor-tema></div>
+  </div>
+</div>
+
+<!-- ============================================================
+     APLICATIVO
+     ============================================================ -->
+<div id="app" class="app" hidden>
+
+  <!-- MENU LATERAL (computador) / GAVETA (celular) -->
+  <aside class="sidebar" id="sidebar">
+    <div class="marca">
+      <span class="marca-icone" data-icone="marca"></span>
+      Tempero de Mãe
+    </div>
+
+    <nav class="menu-lateral" id="menuLateral"></nav>
+
+    <div class="sidebar-usuario">
+      <div class="usuario-resumo">
+        <span class="avatar" id="sidebarAvatar"></span>
+        <div class="textos">
+          <strong id="sidebarNome"></strong>
+          <span id="sidebarPerfil"></span>
+        </div>
+      </div>
+      <div class="bloco-tema" data-seletor-tema></div>
+      <button type="button" class="item-menu-conta" data-acao="modo-teste" data-so-dono hidden>
+        <span data-icone="teste"></span> <span data-texto-teste>Entrar no modo teste</span>
+      </button>
+      <button type="button" class="item-menu-conta" data-acao="trocar-senha">
+        <span data-icone="chave"></span> Trocar minha senha
+      </button>
+      <button type="button" class="item-menu-conta" data-acao="sair">
+        <span data-icone="sair"></span> Sair
+      </button>
+    </div>
+  </aside>
+  <div class="sidebar-fundo" id="sidebarFundo"></div>
+
+  <div class="conteudo">
+
+    <!-- Faixa do modo teste (somente o proprietário) -->
+    <div class="faixa-teste" id="faixaTeste" role="status" hidden>
+      <span class="faixa-teste-icone" data-icone="teste"></span>
+      <div class="faixa-teste-texto">
+        <strong>Modo teste</strong>
+        <span>Dados fictícios. Nada do que você fizer aqui fica salvo no sistema real.</span>
+      </div>
+      <button type="button" class="botao botao-pequeno faixa-teste-botao" data-acao="sair-teste">Sair do modo teste</button>
+    </div>
+
+    <header class="topo">
+      <button type="button" class="botao-icone so-celular" id="botaoAbrirMenu" title="Menu" data-icone="menu"></button>
+      <h1 id="tituloPagina">Início</h1>
+
+      <div class="topo-conta">
+        <button type="button" class="avatar" id="botaoConta" title="Minha conta"></button>
+
+        <div class="menu-conta" id="menuConta" hidden>
+          <div class="usuario-resumo">
+            <div class="textos">
+              <strong id="contaNome"></strong>
+              <span id="contaEmail"></span>
+            </div>
+          </div>
+          <div class="bloco-tema" data-seletor-tema></div>
+          <button type="button" class="item-menu-conta" data-acao="modo-teste" data-so-dono hidden>
+            <span data-icone="teste"></span> <span data-texto-teste>Entrar no modo teste</span>
+          </button>
+          <button type="button" class="item-menu-conta" data-acao="trocar-senha">
+            <span data-icone="chave"></span> Trocar minha senha
+          </button>
+          <button type="button" class="item-menu-conta" data-acao="sair">
+            <span data-icone="sair"></span> Sair
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main class="pagina">
+
+      <!-- ===== RESTAURANTE: INÍCIO ===== -->
+      <section class="view" data-view="inicio-admin" hidden>
+        <div class="saudacao">
+          <h2 id="saudacaoAdmin">Olá!</h2>
+          <p id="dataHojeAdmin"></p>
+        </div>
+
+        <div class="grade-indicadores" id="indicadoresAdmin"></div>
+
+        <div class="grade-paineis">
+          <div class="cartao">
+            <h2>Atenção</h2>
+            <p class="subtitulo-cartao">Pontos que precisam de ação.</p>
+            <div id="alertasAdmin"></div>
+          </div>
+
+          <div class="cartao">
+            <h2>Pedidos de hoje</h2>
+            <p class="subtitulo-cartao" id="subtituloPedidosHojeAdmin">Enviados pelas empresas.</p>
+            <div id="pedidosHojeAdmin"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== RESTAURANTE: EMPRESAS ===== -->
+      <section class="view" data-view="empresas" hidden>
+        <p class="pagina-descricao">Empresas clientes, acesso do responsável e situação de cada contrato.</p>
+
+        <div class="ferramentas">
+          <div class="campo-busca">
+            <span data-icone="busca"></span>
+            <input type="search" id="buscaEmpresas" placeholder="Buscar por nome, CNPJ ou e-mail">
+          </div>
+          <select id="filtroStatusEmpresas">
+            <option value="ATIVO">Ativas</option>
+            <option value="INATIVO">Inativas</option>
+            <option value="TODOS">Todas</option>
+          </select>
+          <button type="button" class="botao botao-primario" id="botaoNovaEmpresa">
+            <span data-icone="adicionar"></span> Nova empresa
+          </button>
+        </div>
+
+        <div class="contador" id="contadorEmpresas"></div>
+        <div id="listaEmpresas"></div>
+      </section>
+
+      <!-- ===== RESTAURANTE: PREÇOS ===== -->
+      <section class="view" data-view="precos" hidden>
+        <p class="pagina-descricao">
+          Valor da quentinha por empresa. Para reajustar, encerre o preço atual e cadastre o novo
+          a partir do dia seguinte. Pedidos já feitos mantêm o valor da época.
+        </p>
+
+        <div class="ferramentas">
+          <select id="filtroEmpresaPrecos">
+            <option value="">Todas as empresas</option>
+          </select>
+          <select id="filtroSituacaoPrecos">
+            <option value="ATUAIS">Vigentes e futuros</option>
+            <option value="TODOS">Todo o histórico</option>
+          </select>
+          <span class="espaco"></span>
+          <button type="button" class="botao botao-primario" id="botaoNovoPreco">
+            <span data-icone="adicionar"></span> Novo preço
+          </button>
+        </div>
+
+        <div id="listaPrecos"></div>
+      </section>
+
+      <!-- ===== RESTAURANTE: FUNCIONÁRIOS (CONSULTA) ===== -->
+      <section class="view" data-view="funcionarios-admin" hidden>
+        <p class="pagina-descricao">
+          Cadastre os funcionários de cada empresa e marque quem pode escolher e personalizar a quentinha.
+          Os demais recebem a quentinha do dia. As empresas apenas consultam essa lista e fazem os pedidos.
+        </p>
+
+        <div class="ferramentas">
+          <select id="filtroEmpresaFuncionarios">
+            <option value="">Selecione uma empresa</option>
+          </select>
+          <div class="campo-busca">
+            <span data-icone="busca"></span>
+            <input type="search" id="buscaFuncionariosAdmin" placeholder="Buscar por nome, matrícula ou setor">
+          </div>
+          <select id="filtroStatusFuncionariosAdmin">
+            <option value="ATIVO">Ativos</option>
+            <option value="INATIVO">Inativos</option>
+            <option value="TODOS">Todos</option>
+          </select>
+          <button type="button" class="botao botao-primario" id="botaoNovoFuncionarioAdmin">
+            <span data-icone="adicionar"></span> Novo funcionário
+          </button>
+        </div>
+
+        <div class="contador" id="contadorFuncionariosAdmin"></div>
+        <div id="listaFuncionariosAdmin"></div>
+      </section>
+
+      <!-- ===== EMPRESA: INÍCIO ===== -->
+      <section class="view" data-view="inicio-empresa" hidden>
+        <div class="saudacao">
+          <h2 id="saudacaoEmpresa">Olá!</h2>
+          <p id="dataHojeEmpresa"></p>
+        </div>
+
+        <div class="grade-indicadores" id="indicadoresEmpresa"></div>
+
+        <div class="grade-paineis">
+          <div class="cartao">
+            <h2 id="tituloCardapioDestaque">Cardápio de hoje</h2>
+            <p class="subtitulo-cartao" id="subtituloCardapioDestaque">Publicado pelo restaurante.</p>
+            <div id="cardapioDestaqueEmpresa"></div>
+          </div>
+
+          <div class="cartao">
+            <h2>Pedido de hoje</h2>
+            <p class="subtitulo-cartao" id="subtituloPedidoHojeEmpresa">Situação do seu pedido.</p>
+            <div id="pedidoHojeEmpresa"></div>
+            <button type="button" class="botao botao-secundario botao-largo espaco-acima" id="atalhoVerFuncionarios">
+              <span data-icone="pessoas"></span> Ver funcionários
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== EMPRESA: FUNCIONÁRIOS ===== -->
+      <section class="view" data-view="funcionarios-empresa" hidden>
+        <p class="pagina-descricao">
+          Funcionários da sua empresa cadastrados pelo restaurante. Quem está marcado em
+          "Personaliza" pode ter itens acrescentados ou removidos no pedido. Para incluir,
+          alterar ou desligar alguém, fale com o restaurante.
+        </p>
+
+        <div class="ferramentas">
+          <div class="campo-busca">
+            <span data-icone="busca"></span>
+            <input type="search" id="buscaFuncionarios" placeholder="Buscar por nome, matrícula ou setor">
+          </div>
+          <select id="filtroStatusFuncionarios">
+            <option value="ATIVO">Ativos</option>
+            <option value="INATIVO">Inativos</option>
+            <option value="TODOS">Todos</option>
+          </select>
+        </div>
+
+        <div class="contador" id="contadorFuncionarios"></div>
+        <div id="listaFuncionarios"></div>
+      </section>
+
+      <!-- ===== RESTAURANTE: CARDÁPIOS ===== -->
+      <section class="view" data-view="cardapios" hidden>
+        <div class="cardapio-topo" id="cardapioTopo"></div>
+        <div id="gradeCardapio"></div>
+      </section>
+
+      <!-- ===== EMPRESA: CARDÁPIO ===== -->
+      <section class="view" data-view="cardapio-empresa" hidden>
+        <div class="cardapio-topo" id="cardapioEmpresaTopo"></div>
+        <div id="gradeCardapioEmpresa"></div>
+      </section>
+
+      <!-- ===== RESTAURANTE: PEDIDOS DO DIA ===== -->
+      <section class="view" data-view="pedidos" hidden>
+        <div class="cardapio-topo" id="pedidosTopo"></div>
+        <div id="pedidosConteudo"></div>
+      </section>
+
+      <!-- ===== RESTAURANTE: COBRANÇAS ===== -->
+      <section class="view" data-view="cobrancas" hidden>
+        <div id="cobrancasConteudo"></div>
+      </section>
+
+      <!-- ===== EMPRESA: COBRANÇAS ===== -->
+      <section class="view" data-view="cobrancas-empresa" hidden>
+        <p class="pagina-descricao">Cobranças do restaurante para a sua empresa. Abra uma cobrança para ver o consumo e baixar o extrato em PDF.</p>
+        <div id="cobrancasEmpresaConteudo"></div>
+      </section>
+
+      <!-- ===== RESTAURANTE: RELATÓRIOS ===== -->
+      <!-- ===== RESTAURANTE: DASHBOARD ===== -->
+      <section class="view" data-view="dashboard" hidden>
+        <p class="pagina-descricao">Resumo do restaurante em gráficos. Passe o mouse (ou toque) numa fatia para ver o número.</p>
+        <div id="dashboardConteudo"></div>
+      </section>
+
+      <section class="view" data-view="relatorios" hidden>
+        <div class="cartao filtros-relatorio" id="filtrosRelatorio"></div>
+        <div id="relatorioConteudo"></div>
+      </section>
+
+      <!-- ===== RESTAURANTE: CONFIGURAÇÕES (somente o proprietário) ===== -->
+      <section class="view" data-view="configuracoes" hidden>
+        <p class="pagina-descricao">Ligue ou desligue funções do aplicativo, no geral e para cada empresa. Somente você, como proprietário, vê esta tela.</p>
+        <div id="configuracoesConteudo"></div>
+      </section>
+
+      <!-- ===== RESTAURANTE: ACESSOS (somente o proprietário) ===== -->
+      <section class="view" data-view="acessos" hidden>
+        <p class="pagina-descricao">Quem pode entrar no painel de gestão do restaurante. Somente você, como proprietário, vê esta tela.</p>
+
+        <div class="ferramentas">
+          <div class="espaco"></div>
+          <button type="button" class="botao botao-primario" id="botaoNovoAdministrador">
+            <span data-icone="adicionar"></span> Novo administrador
+          </button>
+        </div>
+
+        <div class="contador" id="contadorAdministradores"></div>
+        <div id="listaAdministradores"></div>
+      </section>
+
+      <!-- ===== EMPRESA: PEDIDO DE HOJE ===== -->
+      <section class="view" data-view="pedidos-empresa" hidden>
+        <div id="pedidoEmpresaConteudo"></div>
+      </section>
+
+      <!-- ===== MÓDULOS EM CONSTRUÇÃO ===== -->
+      <section class="view" data-view="em-breve" hidden>
+        <div class="cartao em-breve">
+          <div class="indicador-icone" id="emBreveIcone"></div>
+          <h2 id="emBreveTitulo">Em construção</h2>
+          <p id="emBreveTexto">Este módulo será liberado nas próximas etapas.</p>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- BARRA INFERIOR (celular) -->
+  <nav class="barra-inferior" id="barraInferior"></nav>
+</div>
+
+<!-- ============================================================
+     JANELAS E AVISOS
+     ============================================================ -->
+<div class="modal-fundo" id="modalFundo" hidden>
+  <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitulo">
+    <header class="modal-topo">
+      <h2 id="modalTitulo"></h2>
+      <button type="button" class="botao-icone" id="modalFechar" title="Fechar" data-icone="fechar"></button>
+    </header>
+    <div class="modal-corpo" id="modalCorpo"></div>
+  </div>
+</div>
+
+<div class="modal-fundo confirmacao" id="confirmacaoFundo" hidden>
+  <div class="modal pequeno" role="alertdialog" aria-modal="true" aria-labelledby="confirmacaoTitulo">
+    <header class="modal-topo">
+      <h2 id="confirmacaoTitulo"></h2>
+    </header>
+    <div class="modal-corpo">
+      <p id="confirmacaoTexto"></p>
+      <div class="modal-rodape">
+        <button type="button" class="botao botao-secundario" id="confirmacaoCancelar">Cancelar</button>
+        <button type="button" class="botao botao-primario" id="confirmacaoOk">Confirmar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<!-- Conteúdo montado na hora de imprimir (só aparece no papel) -->
+<div id="areaImpressao" class="area-impressao"></div>
+
+<!-- ============================================================
+     MODELOS DE FORMULÁRIO (abertos dentro das janelas)
+     ============================================================ -->
+
+<!-- EMPRESA -->
+<template id="tplFormEmpresa">
+  <form novalidate>
+    <div class="mensagem-erro" data-erro hidden></div>
+
+    <div class="grade-2">
+      <div class="campo inteiro">
+        <label>Nome da empresa</label>
+        <input name="nome" maxlength="120" required>
+      </div>
+
+      <div class="campo">
+        <label>CNPJ <span class="secundario">(opcional)</span></label>
+        <input name="cnpj" inputmode="numeric" data-mascara="cnpj" placeholder="00.000.000/0000-00">
+      </div>
+
+      <div class="campo">
+        <label>Telefone</label>
+        <input name="telefone" type="tel" inputmode="tel" data-mascara="telefone" placeholder="(21) 99999-9999">
+      </div>
+
+      <div class="campo inteiro">
+        <label>Endereço de entrega</label>
+        <input name="endereco" maxlength="200">
+      </div>
+
+      <div class="campo">
+        <label>Nome do responsável</label>
+        <input name="responsavel" maxlength="120" placeholder="Quem fará os pedidos">
+      </div>
+
+      <div class="campo">
+        <label>E-mail para contato</label>
+        <input name="email" type="email" required>
+        <div class="dica">Fica registrado para contatos futuros. Não é usado para entrar.</div>
+      </div>
+
+      <div class="campo inteiro">
+        <label>Usuário de acesso</label>
+        <input name="login" maxlength="40" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Ex.: afx" required>
+        <div class="dica">É com ele que a empresa entra. Letras sem acento, números, ponto ou hífen, sem espaços.</div>
+      </div>
+
+      <div class="nota inteiro" data-somente-cadastro>
+        Você não define a senha: depois de cadastrar, envie o convite. No primeiro acesso, a própria empresa cria a senha dela.
+      </div>
+    </div>
+
+    <div class="modal-rodape">
+      <button type="button" class="botao botao-secundario" data-cancelar>Cancelar</button>
+      <button type="submit" class="botao botao-primario" data-enviar>Salvar</button>
+    </div>
+  </form>
+</template>
+
+<!-- ADMINISTRADOR DO RESTAURANTE -->
+<template id="tplFormAdministrador">
+  <form novalidate>
+    <div class="mensagem-erro" data-erro hidden></div>
+
+    <div class="grade-2">
+      <div class="campo">
+        <label>Nome</label>
+        <input name="nome" maxlength="120" required placeholder="Ex.: Ana (caixa)">
+      </div>
+
+      <div class="campo" data-somente-equipe>
+        <label>Usuário de acesso</label>
+        <input name="login" maxlength="40" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="ex.: ana.caixa">
+      </div>
+    </div>
+
+    <div class="campo" data-somente-equipe>
+      <label>E-mail <span class="secundario">(opcional, só para contato)</span></label>
+      <input name="email" type="email" placeholder="Pode deixar em branco">
+    </div>
+
+    <div data-somente-equipe>
+      <h4 class="titulo-permissoes">O que esta pessoa pode acessar</h4>
+      <p class="dica">Marque as abas. Dentro de cada aba, escolha as funções extras. Configurações, Acessos e Limpeza são só seus.</p>
+      <div class="lista-permissoes" data-permissoes></div>
+    </div>
+
+    <div class="alerta info" data-somente-cadastro>
+      <span data-icone="convite"></span>
+      <div class="texto">Não precisa criar senha: depois de salvar, você recebe um convite para enviar. A pessoa cria a própria senha no primeiro acesso.</div>
+    </div>
+
+    <div class="modal-rodape">
+      <button type="button" class="botao botao-secundario" data-cancelar>Cancelar</button>
+      <button type="submit" class="botao botao-primario" data-enviar>Salvar</button>
+    </div>
+  </form>
+</template>
+
+<!-- PREÇO -->
+<template id="tplFormPreco">
+  <form novalidate>
+    <div class="mensagem-erro" data-erro hidden></div>
+
+    <div class="campo">
+      <label>Empresa</label>
+      <select name="empresa_id" required></select>
+    </div>
+
+    <div class="grade-2">
+      <div class="campo inteiro">
+        <label>Valor da quentinha</label>
+        <input name="valor_unitario" inputmode="numeric" data-mascara="moeda" placeholder="R$ 0,00" required>
+      </div>
+
+      <div class="campo">
+        <label>Início da vigência</label>
+        <input name="data_inicio" type="date" required>
+      </div>
+
+      <div class="campo">
+        <label>Fim da vigência <span class="secundario">(opcional)</span></label>
+        <input name="data_fim" type="date">
+      </div>
+    </div>
+
+    <div class="nota">Sem data final, o preço vale por tempo indeterminado, até você encerrá-lo.</div>
+
+    <div class="modal-rodape">
+      <button type="button" class="botao botao-secundario" data-cancelar>Cancelar</button>
+      <button type="submit" class="botao botao-primario" data-enviar>Cadastrar preço</button>
+    </div>
+  </form>
+</template>
+
+<!-- ENCERRAR PREÇO -->
+<template id="tplEncerrarPreco">
+  <form novalidate>
+    <div class="mensagem-erro" data-erro hidden></div>
+
+    <p data-descricao></p>
+
+    <div class="campo">
+      <label>Último dia de vigência</label>
+      <input name="data_fim" type="date" required>
+      <div class="dica">Para um reajuste, use o dia anterior ao novo preço.</div>
+    </div>
+
+    <div class="modal-rodape">
+      <button type="button" class="botao botao-secundario" data-cancelar>Cancelar</button>
+      <button type="submit" class="botao botao-primario" data-enviar>Encerrar vigência</button>
+    </div>
+  </form>
+</template>
+
+<!-- FUNCIONÁRIO -->
+<template id="tplFormFuncionario">
+  <form novalidate>
+    <div class="mensagem-erro" data-erro hidden></div>
+
+    <div class="campo">
+      <label>Empresa</label>
+      <select name="empresa_id" required></select>
+    </div>
+
+    <div class="grade-2">
+      <div class="campo inteiro">
+        <label>Nome completo</label>
+        <input name="nome" maxlength="120" required>
+      </div>
+
+      <div class="campo">
+        <label>Matrícula <span class="secundario">(opcional)</span></label>
+        <input name="matricula" maxlength="30">
+      </div>
+
+      <div class="campo">
+        <label>Setor <span class="secundario">(opcional)</span></label>
+        <input name="setor" maxlength="60" list="listaSetores" autocomplete="off">
+        <datalist id="listaSetores"></datalist>
+      </div>
+
+      <div class="campo inteiro">
+        <label>Telefone <span class="secundario">(opcional)</span></label>
+        <input name="telefone" type="tel" inputmode="tel" data-mascara="telefone" placeholder="(21) 99999-9999">
+      </div>
+    </div>
+
+    <label class="opcao-checkbox">
+      <input name="pode_alterar_quentinha" type="checkbox">
+      <div>
+        <strong>Pode escolher e personalizar a quentinha</strong>
+        <span>No pedido, escolhe a proteína e pode tirar itens ou deixar observação (conforme a configuração da empresa). Os demais recebem a quentinha do dia.</span>
+      </div>
+    </label>
+
+    <div class="modal-rodape">
+      <button type="button" class="botao botao-secundario" data-cancelar>Cancelar</button>
+      <button type="submit" class="botao botao-primario" data-enviar>Salvar</button>
+    </div>
+  </form>
+</template>
+
+<!-- NOVA COBRANÇA -->
+<template id="tplFormCobranca">
+  <form novalidate>
+    <div class="mensagem-erro" data-erro hidden></div>
+
+    <div class="campo">
+      <label>Empresa</label>
+      <select name="empresa_id" required></select>
+    </div>
+
+    <div class="grade-2">
+      <div class="campo">
+        <label>De</label>
+        <input name="inicio" type="date" required>
+      </div>
+
+      <div class="campo">
+        <label>Até</label>
+        <input name="fim" type="date" required>
+      </div>
+    </div>
+
+    <div data-previa></div>
+
+    <div class="grade-2">
+      <div class="campo">
+        <label>Vencimento</label>
+        <input name="vencimento" type="date" required>
+      </div>
+
+      <div class="campo">
+        <label>Observação <span class="secundario">(opcional)</span></label>
+        <input name="observacoes" maxlength="300" placeholder="Aparece no extrato">
+      </div>
+    </div>
+
+    <details class="bloco-desconto" data-bloco-desconto hidden>
+      <summary><span data-icone="desconto"></span> Aplicar desconto <span class="secundario">(opcional)</span></summary>
+      <div class="grade-desconto">
+        <div class="campo">
+          <label>Tipo</label>
+          <select name="desconto_tipo">
+            <option value="VALOR">Em reais (R$)</option>
+            <option value="PERCENTUAL">Porcentagem (%)</option>
+          </select>
+        </div>
+        <div class="campo">
+          <label>Desconto</label>
+          <input name="desconto_valor" inputmode="decimal" placeholder="0,00" autocomplete="off">
+        </div>
+      </div>
+      <div class="campo">
+        <label>Motivo do desconto</label>
+        <input name="desconto_motivo" maxlength="200" placeholder="Ex.: acordo comercial, atraso na entrega">
+      </div>
+      <div class="nota" data-resultado-desconto></div>
+    </details>
+
+    <div class="nota">Os pedidos que entram na cobrança ficam travados: não podem mais ser alterados nem recusados.</div>
+
+    <div class="modal-rodape">
+      <button type="button" class="botao botao-secundario" data-cancelar>Cancelar</button>
+      <button type="submit" class="botao botao-primario" data-enviar>Gerar cobrança</button>
+    </div>
+  </form>
+</template>
+
+<!-- CICLO DE COBRANÇA DA EMPRESA -->
+<template id="tplFormCicloCobranca">
+  <form novalidate>
+    <div class="mensagem-erro" data-erro hidden></div>
+
+    <div class="campo">
+      <label>Ciclo de cobrança</label>
+      <select name="ciclo_cobranca">
+        <option value="LIVRE">Livre (eu escolho as datas)</option>
+        <option value="SEMANAL">Semanal (segunda a domingo)</option>
+        <option value="QUINZENAL">Quinzenal (dias 1–15 e 16–fim do mês)</option>
+        <option value="MENSAL">Mensal (mês inteiro)</option>
+      </select>
+    </div>
+
+    <div class="campo">
+      <label>Prazo para pagar</label>
+      <input name="dias_vencimento" type="number" min="0" max="90" step="1" inputmode="numeric" required>
+      <div class="dica">Dias depois da emissão. O vencimento pode ser mudado em cada cobrança.</div>
+    </div>
+
+    <div class="modal-rodape">
+      <button type="button" class="botao botao-secundario" data-cancelar>Cancelar</button>
+      <button type="submit" class="botao botao-primario" data-enviar>Salvar</button>
+    </div>
+  </form>
+</template>
+
+<!-- DADOS PARA PAGAMENTO -->
+<template id="tplFormDadosPagamento">
+  <form novalidate>
+    <div class="mensagem-erro" data-erro hidden></div>
+
+    <div class="campo">
+      <label>Como as empresas devem pagar</label>
+      <textarea name="instrucoes" maxlength="500" placeholder="Ex.: Pix (CNPJ) 12.345.678/0001-90 — Tempero de Mãe&#10;Banco do Brasil · Ag. 1234 · CC 56789-0"></textarea>
+      <div class="dica">Aparece no extrato em PDF e na tela de cobranças das empresas.</div>
+    </div>
+
+    <div class="modal-rodape">
+      <button type="button" class="botao botao-secundario" data-cancelar>Cancelar</button>
+      <button type="submit" class="botao botao-primario" data-enviar>Salvar</button>
+    </div>
+  </form>
+</template>
+
+<!-- DESCONTO NA COBRANÇA -->
+<template id="tplFormDesconto">
+  <form novalidate>
+    <div class="mensagem-erro" data-erro hidden></div>
+    <p data-descricao></p>
+      <div class="grade-desconto">
+        <div class="campo">
+          <label>Tipo</label>
+          <select name="desconto_tipo">
+            <option value="VALOR">Em reais (R$)</option>
+            <option value="PERCENTUAL">Porcentagem (%)</option>
+          </select>
+        </div>
+        <div class="campo">
+          <label>Desconto</label>
+          <input name="desconto_valor" inputmode="decimal" placeholder="0,00" autocomplete="off">
+        </div>
+      </div>
+      <div class="campo">
+        <label>Motivo do desconto</label>
+        <input name="desconto_motivo" maxlength="200" placeholder="Ex.: acordo comercial, atraso na entrega">
+      </div>
+      <div class="nota" data-resultado-desconto></div>
+    <div class="modal-rodape">
+      <button type="button" class="botao botao-fantasma botao-texto-perigo" data-remover-desconto hidden>Remover desconto</button>
+      <button type="button" class="botao botao-secundario" data-cancelar>Cancelar</button>
+      <button type="submit" class="botao botao-primario" data-enviar>Aplicar desconto</button>
+    </div>
+  </form>
+</template>
+
+<!-- REGISTRAR PAGAMENTO -->
+<template id="tplFormPagamento">
+  <form novalidate>
+    <div class="mensagem-erro" data-erro hidden></div>
+
+    <p data-descricao></p>
+
+    <div class="grade-2">
+      <div class="campo">
+        <label>Valor recebido</label>
+        <input name="valor" inputmode="numeric" data-mascara="moeda" placeholder="R$ 0,00" required>
+      </div>
+
+      <div class="campo">
+        <label>Data do pagamento</label>
+        <input name="data" type="date" required>
+      </div>
+
+      <div class="campo">
+        <label>Forma de pagamento</label>
+        <select name="forma"></select>
+      </div>
+
+      <div class="campo">
+        <label>Referência <span class="secundario">(opcional)</span></label>
+        <input name="comprovante" maxlength="120" placeholder="Ex.: ID do Pix, nº do recibo">
+      </div>
+
+      <div class="campo inteiro">
+        <label>Observação <span class="secundario">(opcional)</span></label>
+        <input name="observacoes" maxlength="300">
+      </div>
+    </div>
+
+    <div class="modal-rodape">
+      <button type="button" class="botao botao-secundario" data-cancelar>Cancelar</button>
+      <button type="submit" class="botao botao-primario" data-enviar>Registrar pagamento</button>
+    </div>
+  </form>
+</template>
+
+<!-- VENCIMENTO E OBSERVAÇÃO DA COBRANÇA -->
+<template id="tplFormEditarCobranca">
+  <form novalidate>
+    <div class="mensagem-erro" data-erro hidden></div>
+
+    <div class="campo">
+      <label>Vencimento</label>
+      <input name="vencimento" type="date" required>
+    </div>
+
+    <div class="campo">
+      <label>Observação <span class="secundario">(opcional)</span></label>
+      <input name="observacoes" maxlength="300" placeholder="Aparece no extrato">
+    </div>
+
+    <div class="modal-rodape">
+      <button type="button" class="botao botao-secundario" data-cancelar>Cancelar</button>
+      <button type="submit" class="botao botao-primario" data-enviar>Salvar</button>
+    </div>
+  </form>
+</template>
+
+<!-- CANCELAR COBRANÇA -->
+<template id="tplFormCancelarCobranca">
+  <form novalidate>
+    <div class="mensagem-erro" data-erro hidden></div>
+
+    <p data-descricao></p>
+
+    <div class="campo">
+      <label>Motivo</label>
+      <input name="motivo" maxlength="300" required placeholder="Ex.: período errado">
+    </div>
+
+    <div class="modal-rodape">
+      <button type="button" class="botao botao-secundario" data-cancelar>Voltar</button>
+      <button type="submit" class="botao botao-perigo" data-enviar>Cancelar cobrança</button>
+    </div>
+  </form>
+</template>
+
+<!-- CONFIGURAÇÃO DE UMA EMPRESA (ou do padrão) -->
+<template id="tplFormConfigEmpresa">
+  <form novalidate>
+    <div class="mensagem-erro" data-erro hidden></div>
+
+    <label class="opcao-checkbox" data-usar-padrao>
+      <input name="usa_padrao" type="checkbox">
+      <div>
+        <strong>Usar o padrão das empresas</strong>
+        <span data-texto-padrao></span>
+      </div>
+    </label>
+
+    <div class="opcoes-config" data-opcoes>
+      <div class="campo">
+        <label>Escolha da quentinha no pedido</label>
+        <select name="escolha">
+          <option value="PERSONALIZADOS">Só quem pode personalizar escolhe a proteína</option>
+          <option value="TODOS">Todos escolhem a proteína</option>
+          <option value="NINGUEM">Ninguém escolhe: todos recebem a quentinha do dia</option>
+        </select>
+        <div class="dica">Quem não escolhe recebe a quentinha do dia. O cardápio continua aparecendo para informar o que vem.</div>
+      </div>
+
+      <label class="opcao-checkbox">
+        <input name="mostrar_precos" type="checkbox">
+        <div>
+          <strong>Mostrar preços para a empresa</strong>
+          <span>Desligado: a empresa não vê o valor da quentinha nem o total dos pedidos.</span>
+        </div>
+      </label>
+
+      <label class="opcao-checkbox">
+        <input name="cobrancas" type="checkbox">
+        <div>
+          <strong>Cobranças</strong>
+          <span>Desligado: a empresa não vê a tela de cobranças e ela não aparece em “A faturar”.</span>
+        </div>
+      </label>
+
+      <label class="opcao-checkbox">
+        <input name="avulsas" type="checkbox">
+        <div>
+          <strong>Quentinhas avulsas</strong>
+          <span>Permite pedir quentinhas para visitantes ou quem não está cadastrado.</span>
+        </div>
+      </label>
+    </div>
+
+    <div class="modal-rodape">
+      <button type="button" class="botao botao-secundario" data-cancelar>Cancelar</button>
+      <button type="submit" class="botao botao-primario" data-enviar>Salvar</button>
+    </div>
+  </form>
+</template>
+
+<!-- CONVITE DE PRIMEIRO ACESSO -->
+<template id="tplConvite">
+  <div>
+    <p data-descricao></p>
+
+    <div class="credenciais">
+      <div><span>Usuário</span><strong data-usuario></strong></div>
+      <div><span>Link</span><strong data-link class="link-convite"></strong></div>
+      <div><span>Válido até</span><strong data-validade></strong></div>
+    </div>
+
+    <div class="campo">
+      <label>Mensagem (pode editar antes de enviar)</label>
+      <textarea data-mensagem rows="9"></textarea>
+    </div>
+
+    <div class="acoes-convite">
+      <a class="botao botao-secundario" data-whatsapp target="_blank" rel="noopener"><span data-icone="convite"></span> WhatsApp</a>
+      <a class="botao botao-secundario" data-email target="_blank" rel="noopener"><span data-icone="convite"></span> E-mail</a>
+    </div>
+
+    <div class="nota">Por segurança, você não vê a senha da empresa. O link vale uma vez só; um convite novo cancela o anterior.</div>
+
+    <div class="modal-rodape">
+      <button type="button" class="botao botao-secundario" data-cancelar>Fechar</button>
+      <button type="button" class="botao botao-primario" data-copiar>
+        <span data-icone="copiar"></span> Copiar mensagem
+      </button>
+    </div>
+  </div>
+</template>
+
+<!-- TROCAR SENHA -->
+<template id="tplTrocarSenha">
+  <form novalidate>
+    <div class="mensagem-erro" data-erro hidden></div>
+
+    <div class="campo">
+      <label>Senha atual</label>
+      <input name="atual" type="password" autocomplete="current-password" required>
+    </div>
+
+    <div class="campo">
+      <label>Nova senha</label>
+      <input name="nova" type="password" autocomplete="new-password" minlength="6" required>
+      <div class="dica">Mínimo de 6 caracteres. Evite datas de nascimento e sequências como 123456.</div>
+    </div>
+
+    <div class="campo">
+      <label>Repita a nova senha</label>
+      <input name="confirmacao" type="password" autocomplete="new-password" required>
+    </div>
+
+    <div class="modal-rodape">
+      <button type="button" class="botao botao-secundario" data-cancelar>Cancelar</button>
+      <button type="submit" class="botao botao-primario" data-enviar>Trocar senha</button>
+    </div>
+  </form>
+</template>
+
+<!-- DADOS DE ACESSO (após cadastrar empresa ou redefinir senha) -->
+<template id="tplCredenciais">
+  <div>
+    <p data-descricao></p>
+
+    <div class="credenciais">
+      <div><span>Endereço</span><strong data-endereco></strong></div>
+      <div><span>E-mail</span><strong data-email></strong></div>
+      <div><span>Senha</span><strong data-senha></strong></div>
+    </div>
+
+    <div class="nota">Esta senha não será mostrada novamente. Copie e envie ao responsável.</div>
+
+    <div class="modal-rodape">
+      <button type="button" class="botao botao-secundario" data-cancelar>Fechar</button>
+      <button type="button" class="botao botao-primario" data-copiar>
+        <span data-icone="copiar"></span> Copiar dados
+      </button>
+    </div>
+  </div>
+</template>
+
+<?!= incluir('Script'); ?>
+<?!= incluir('ScriptAdmin'); ?>
+<?!= incluir('ScriptEmpresa'); ?>
+<?!= incluir('ScriptCardapios'); ?>
+<?!= incluir('ScriptPedidos'); ?>
+<?!= incluir('ScriptRelatorios'); ?>
+<?!= incluir('ScriptCobrancas'); ?>
+<?!= incluir('ScriptSistema'); ?>
+<?!= incluir('ScriptDashboard'); ?>
+
+</body>
+</html>

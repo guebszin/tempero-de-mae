@@ -1,0 +1,1054 @@
+<script>
+// ================================================================
+// SCRIPTCOBRANCAS.html — cobranças e pagamentos
+// Restaurante: o que falta cobrar por empresa (com período sugerido
+// pelo ciclo), cobranças geradas, pagamentos parciais e extrato.
+// Empresa: as próprias cobranças e o extrato em PDF.
+// ================================================================
+
+const cobranca = {
+  painel: null,
+  painelEm: 0,
+  aba: 'faturar',
+  filtroStatus: 'ABERTAS',
+  filtroEmpresa: '',
+  busca: '',
+  doPortal: null,          // dados da tela da empresa
+  doPortalEm: 0
+};
+
+const NOMES_CICLO = { LIVRE: 'Livre', SEMANAL: 'Semanal', QUINZENAL: 'Quinzenal', MENSAL: 'Mensal' };
+
+const FORMAS_PAGAMENTO_TELA = [
+  { id: 'PIX', texto: 'Pix' },
+  { id: 'DINHEIRO', texto: 'Dinheiro' },
+  { id: 'TRANSFERENCIA', texto: 'Transferência' },
+  { id: 'BOLETO', texto: 'Boleto' },
+  { id: 'CARTAO', texto: 'Cartão' },
+  { id: 'OUTRO', texto: 'Outro' }
+];
+
+AO_SAIR.push(function() {
+  cobranca.painel = null;
+  cobranca.painelEm = 0;
+  cobranca.aba = 'faturar';
+  cobranca.filtroStatus = 'ABERTAS';
+  cobranca.filtroEmpresa = '';
+  cobranca.busca = '';
+  cobranca.doPortal = null;
+  cobranca.doPortalEm = 0;
+});
+
+// ---------- AUXILIARES ----------
+function numeroCobranca(numero) {
+  return 'Nº ' + String(numero || 0).padStart(4, '0');
+}
+
+function periodoCobranca(c) {
+  return textoPeriodo(c.periodo_inicio || c.inicio, c.periodo_fim || c.fim);
+}
+
+function etiquetaCobranca(c) {
+  if (c.status === 'CANCELADA') return criarEtiqueta('Cancelada', 'cinza');
+  if (c.status === 'PAGA') return criarEtiqueta('Paga', 'verde');
+  if (c.vencida) return criarEtiqueta(c.status === 'PARCIAL' ? 'Vencida · parcial' : 'Vencida', 'vermelha');
+  if (c.status === 'PARCIAL') return criarEtiqueta('Pago em parte', 'azul');
+  return criarEtiqueta('Em aberto', 'amarela');
+}
+
+function textoSituacaoCobranca(c) {
+  if (c.status === 'CANCELADA') return 'Cancelada';
+  if (c.status === 'PAGA') return 'Paga';
+  if (c.vencida) return c.status === 'PARCIAL' ? 'Vencida (paga em parte)' : 'Vencida';
+  if (c.status === 'PARCIAL') return 'Paga em parte';
+  return 'Em aberto';
+}
+
+function quentinhasTexto(n) {
+  return n + (n === 1 ? ' quentinha' : ' quentinhas');
+}
+
+function diasAteTexto(data) {
+  const dias = Math.round((textoParaData(data) - textoParaData(hojeTexto())) / 86400000);
+  if (dias === 0) return 'vence hoje';
+  if (dias === 1) return 'vence amanhã';
+  if (dias > 1) return 'vence em ' + dias + ' dias';
+  if (dias === -1) return 'venceu ontem';
+  return 'venceu há ' + (-dias) + ' dias';
+}
+
+function preencherSelect(seletor, opcoes, valor) {
+  seletor.innerHTML = '';
+  opcoes.forEach(function(o) {
+    const opcao = el('option', '', o.texto);
+    opcao.value = o.valor;
+    seletor.appendChild(opcao);
+  });
+  if (valor !== undefined) seletor.value = valor;
+}
+
+// ================================================================
+// RESTAURANTE
+// ================================================================
+TELAS['cobrancas'] = { carregar: carregarCobrancas };
+
+function carregarCobrancas() {
+  const tinhaDados = !!cobranca.painel;
+
+  if (tinhaDados) {
+    renderizarCobrancas();
+  } else {
+    $('cobrancasConteudo').innerHTML = '';
+    mostrarCarregandoLista($('cobrancasConteudo'), 4);
+  }
+
+  if (tinhaDados && recente(cobranca.painelEm)) return;
+
+  apiSessao('obterPainelCobrancas')
+    .then(receberPainelCobrancas)
+    .catch(function(erro) {
+      falhaAoAtualizar($('cobrancasConteudo'), erro, carregarCobrancas, tinhaDados);
+    });
+}
+
+function receberPainelCobrancas(painel) {
+  cobranca.painel = painel;
+  cobranca.painelEm = Date.now();
+  if (estado.telaAtual === 'cobrancas') renderizarCobrancas();
+}
+
+// Depois de gravar: o servidor devolve o painel atualizado
+function depoisDeGravarCobranca(resultado) {
+  if (resultado && resultado.painel) receberPainelCobrancas(resultado.painel);
+  if (resultado && resultado.mensagem) avisar(resultado.mensagem, 'sucesso');
+}
+
+function renderizarCobrancas() {
+  const p = cobranca.painel;
+  const conteudo = $('cobrancasConteudo');
+  conteudo.innerHTML = '';
+
+  // Indicadores
+  const indicadores = el('div', 'grade-indicadores quatro');
+  indicadores.appendChild(criarIndicador({
+    icone: 'cobranca', rotulo: 'A receber', valor: formatarMoeda(p.totais.a_receber),
+    detalhe: p.totais.cobrancas_abertas
+      ? p.totais.cobrancas_abertas + (p.totais.cobrancas_abertas === 1 ? ' cobrança em aberto' : ' cobranças em aberto')
+      : 'nenhuma cobrança em aberto'
+  }));
+  indicadores.appendChild(criarIndicador({
+    icone: 'alerta', cor: p.totais.vencido ? 'amarelo' : 'azul', rotulo: 'Vencido', valor: formatarMoeda(p.totais.vencido),
+    detalhe: p.totais.cobrancas_vencidas
+      ? p.totais.cobrancas_vencidas + (p.totais.cobrancas_vencidas === 1 ? ' cobrança vencida' : ' cobranças vencidas')
+      : 'nada vencido'
+  }));
+  indicadores.appendChild(criarIndicador({
+    icone: 'check', rotulo: 'Recebido no mês', valor: formatarMoeda(p.totais.recebido_mes),
+    detalhe: 'pagamentos registrados em ' + new Date().toLocaleDateString('pt-BR', { month: 'long' })
+  }));
+  indicadores.appendChild(criarIndicador({
+    icone: 'pedido', cor: 'azul', rotulo: 'A faturar', valor: formatarMoeda(p.totais.a_faturar),
+    detalhe: 'pedidos que ainda não entraram em cobrança'
+  }));
+  conteudo.appendChild(indicadores);
+
+  // Ferramentas
+  const ferramentas = el('div', 'ferramentas cobrancas-ferramentas');
+  const abas = el('div', 'abas-relatorio');
+  abas.setAttribute('role', 'tablist');
+  const prontas = p.empresas.filter(function(e) { return e.sugestao && e.sugestao.ciclo_completo; }).length;
+  [
+    { id: 'faturar', texto: 'A faturar' + (prontas ? ' (' + prontas + ')' : '') },
+    { id: 'cobrancas', texto: 'Cobranças' }
+  ].forEach(function(aba) {
+    const botao = el('button', 'aba-relatorio' + (aba.id === cobranca.aba ? ' ativa' : ''), aba.texto);
+    botao.type = 'button';
+    botao.setAttribute('role', 'tab');
+    botao.setAttribute('aria-selected', aba.id === cobranca.aba ? 'true' : 'false');
+    botao.addEventListener('click', function() {
+      cobranca.aba = aba.id;
+      renderizarCobrancas();
+    });
+    abas.appendChild(botao);
+  });
+  ferramentas.appendChild(abas);
+  ferramentas.appendChild(el('div', 'espaco'));
+  if (podeFazer('cobrancas_gerar')) {
+    ferramentas.appendChild(criarBotao('Dados para pagamento', {
+      icone: 'editar', titulo: 'Chave Pix, conta ou outra forma de pagamento que aparece no extrato',
+      aoClicar: abrirDadosPagamento
+    }));
+    ferramentas.appendChild(criarBotao('Nova cobrança', {
+      classe: 'botao-primario', icone: 'adicionar',
+      aoClicar: function() { abrirNovaCobranca(); }
+    }));
+  }
+  conteudo.appendChild(ferramentas);
+
+  if (!p.instrucoes_pagamento && podeFazer('cobrancas_gerar')) {
+    conteudo.appendChild(criarAlerta('Cadastre os dados para pagamento (chave Pix, conta) para eles aparecerem no extrato que a empresa recebe.', {
+      tipo: 'info', icone: 'alerta',
+      botao: criarBotao('Cadastrar', { aoClicar: abrirDadosPagamento })
+    }));
+  }
+
+  const area = el('div');
+  area.id = 'cobrancasArea';
+  conteudo.appendChild(area);
+
+  if (cobranca.aba === 'faturar') renderizarAFaturar(area);
+  else renderizarListaCobrancas(area);
+
+  preencherIcones(conteudo);
+}
+
+// ---------- A FATURAR ----------
+function renderizarAFaturar(area) {
+  const p = cobranca.painel;
+
+  area.appendChild(el('p', 'pagina-descricao',
+    'Pedidos que ainda não entraram em cobrança, por empresa. O período sugerido segue o ciclo de cada empresa; você pode mudar as datas ao gerar.' +
+    (p.ultimo_dia_cobravel < p.hoje ? ' Os pedidos de hoje só entram depois das ' + p.horario_limite + '.' : '')));
+
+  const lista = el('div');
+  renderizarLista(lista, {
+    itens: p.empresas,
+    apagada: function(e) { return !e.pendente.pedidos; },
+    vazio: { icone: 'empresa', titulo: 'Nenhuma empresa ativa', texto: 'Cadastre empresas para começar a cobrar.' },
+    colunas: [
+      { titulo: 'Empresa', valor: function(e) {
+        return textoDuplo(e.nome_empresa,
+          'Ciclo ' + NOMES_CICLO[e.ciclo_cobranca].toLowerCase() + ' · paga em ' + e.dias_vencimento + (e.dias_vencimento === 1 ? ' dia' : ' dias') +
+          (e.status !== 'ATIVO' ? ' · inativa' : ''));
+      } },
+      { titulo: 'Sem cobrança', largura: '170px', valor: function(e) {
+        if (!e.pendente.pedidos) return textoDuplo('Nada a faturar', e.ultima_cobranca_fim ? 'cobrado até ' + formatarData(e.ultima_cobranca_fim) : '');
+        return textoDuplo(quentinhasTexto(e.pendente.quentinhas),
+          e.pendente.pedidos + (e.pendente.pedidos === 1 ? ' pedido' : ' pedidos') + ' desde ' + formatarData(e.pendente.primeira_data));
+      } },
+      { titulo: 'Valor', largura: '120px', valor: function(e) {
+        return e.pendente.pedidos ? el('strong', '', formatarMoeda(e.pendente.valor)) : '—';
+      } },
+      { titulo: 'Próximo período', largura: 'minmax(170px, 1fr)', valor: function(e) {
+        if (!e.sugestao) return e.pendente.pedidos ? textoDuplo('Só pedidos de hoje', 'entram depois das ' + p.horario_limite) : '—';
+        const caixa = textoDuplo(textoPeriodo(e.sugestao.inicio, e.sugestao.fim), formatarMoeda(e.sugestao.valor));
+        if (e.sugestao.ciclo_completo) caixa.appendChild(criarEtiqueta('Pronta para fechar', 'verde'));
+        else if (e.ciclo_cobranca !== 'LIVRE') caixa.appendChild(criarEtiqueta('Ciclo em andamento', 'cinza'));
+        return caixa;
+      } }
+    ],
+    larguraAcoes: podeFazer('cobrancas_gerar') ? '210px' : undefined,
+    acoes: !podeFazer('cobrancas_gerar') ? null : function(e) {
+      const botoes = [criarBotao('Ciclo', {
+        icone: 'calendario', titulo: 'Ciclo de cobrança e prazo de pagamento',
+        aoClicar: function() { abrirCicloEmpresa(e); }
+      })];
+      if (e.sugestao) {
+        botoes.push(criarBotao('Gerar', {
+          classe: e.sugestao.ciclo_completo ? 'botao-primario' : 'botao-secundario', icone: 'cobranca',
+          titulo: 'Gerar a cobrança do período sugerido',
+          aoClicar: function() {
+            abrirNovaCobranca({ empresa_id: e.empresa_id, inicio: e.sugestao.inicio, fim: e.sugestao.fim });
+          }
+        }));
+      }
+      return botoes;
+    }
+  });
+  area.appendChild(lista);
+}
+
+// ---------- LISTA DE COBRANÇAS ----------
+function renderizarListaCobrancas(area) {
+  const p = cobranca.painel;
+
+  const ferramentas = el('div', 'ferramentas');
+  const busca = el('div', 'campo-busca');
+  busca.innerHTML = icone('busca');
+  const campoBusca = el('input');
+  campoBusca.type = 'search';
+  campoBusca.placeholder = 'Buscar por empresa ou número';
+  campoBusca.value = cobranca.busca;
+  busca.appendChild(campoBusca);
+  ferramentas.appendChild(busca);
+
+  const status = el('select');
+  preencherSelect(status, [
+    { valor: 'ABERTAS', texto: 'Em aberto' },
+    { valor: 'VENCIDAS', texto: 'Vencidas' },
+    { valor: 'PAGA', texto: 'Pagas' },
+    { valor: 'CANCELADA', texto: 'Canceladas' },
+    { valor: 'TODAS', texto: 'Todas' }
+  ], cobranca.filtroStatus);
+  ferramentas.appendChild(status);
+
+  const empresa = el('select');
+  const nomes = {};
+  p.cobrancas.forEach(function(c) { nomes[c.empresa_id] = c.nome_empresa; });
+  preencherSelect(empresa, [{ valor: '', texto: 'Todas as empresas' }].concat(
+    Object.keys(nomes)
+      .sort(function(a, b) { return nomes[a].localeCompare(nomes[b], 'pt-BR'); })
+      .map(function(id) { return { valor: id, texto: nomes[id] }; })
+  ), cobranca.filtroEmpresa);
+  if (empresa.value !== cobranca.filtroEmpresa) empresa.value = '';
+  ferramentas.appendChild(empresa);
+  area.appendChild(ferramentas);
+
+  const contador = el('div', 'contador');
+  area.appendChild(contador);
+  const lista = el('div');
+  area.appendChild(lista);
+
+  function desenhar() {
+    const termo = normalizarBusca(cobranca.busca);
+    const itens = p.cobrancas.filter(function(c) {
+      if (cobranca.filtroEmpresa && c.empresa_id !== cobranca.filtroEmpresa) return false;
+      if (cobranca.filtroStatus === 'ABERTAS' && c.status !== 'ABERTA' && c.status !== 'PARCIAL') return false;
+      if (cobranca.filtroStatus === 'VENCIDAS' && !c.vencida) return false;
+      if ((cobranca.filtroStatus === 'PAGA' || cobranca.filtroStatus === 'CANCELADA') && c.status !== cobranca.filtroStatus) return false;
+      if (termo && normalizarBusca(c.nome_empresa + ' ' + numeroCobranca(c.numero) + ' ' + c.numero).indexOf(termo) === -1) return false;
+      return true;
+    });
+
+    const soma = itens.reduce(function(s, c) { return { total: s.total + (c.status === 'CANCELADA' ? 0 : c.valor_liquido), saldo: s.saldo + c.saldo }; }, { total: 0, saldo: 0 });
+    contador.textContent = itens.length
+      ? itens.length + (itens.length === 1 ? ' cobrança' : ' cobranças') + ' · total ' + formatarMoeda(soma.total) +
+        (soma.saldo ? ' · saldo em aberto ' + formatarMoeda(soma.saldo) : '')
+      : '';
+
+    renderizarLista(lista, {
+      itens: itens,
+      apagada: function(c) { return c.status === 'CANCELADA'; },
+      vazio: p.cobrancas.length
+        ? { icone: 'busca', titulo: 'Nenhuma cobrança encontrada', texto: 'Mude o filtro de situação ou de empresa.' }
+        : { icone: 'cobranca', titulo: 'Nenhuma cobrança gerada', texto: 'Use a aba "A faturar" para gerar a primeira cobrança.' },
+      colunas: [
+        { titulo: 'Empresa', valor: function(c) { return textoDuplo(c.nome_empresa, numeroCobranca(c.numero) + ' · ' + periodoCobranca(c)); } },
+        { titulo: 'Vencimento', largura: '140px', valor: function(c) {
+          if (c.status === 'CANCELADA' || c.status === 'PAGA') return formatarData(c.data_vencimento);
+          return textoDuplo(formatarData(c.data_vencimento), diasAteTexto(c.data_vencimento));
+        } },
+        { titulo: 'Valor', largura: '130px', valor: function(c) {
+          return textoDuplo(formatarMoeda(c.valor_liquido), c.status === 'PARCIAL' ? 'falta ' + formatarMoeda(c.saldo)
+            : (c.desconto ? 'com desconto de ' + formatarMoeda(c.desconto) : quentinhasTexto(c.quantidade_total)));
+        } },
+        { titulo: 'Situação', largura: '150px', valor: etiquetaCobranca }
+      ],
+      larguraAcoes: '110px',
+      acoes: function(c) {
+        return [criarBotao('Abrir', { icone: 'olho', aoClicar: function() { abrirDetalheCobranca(c.cobranca_id); } })];
+      }
+    });
+    preencherIcones(lista);
+  }
+
+  campoBusca.addEventListener('input', function() { cobranca.busca = campoBusca.value; desenhar(); });
+  status.addEventListener('change', function() { cobranca.filtroStatus = status.value; desenhar(); });
+  empresa.addEventListener('change', function() { cobranca.filtroEmpresa = empresa.value; desenhar(); });
+  desenhar();
+}
+
+// ---------- NOVA COBRANÇA ----------
+function abrirNovaCobranca(inicial) {
+  inicial = inicial || {};
+  const p = cobranca.painel;
+  let ultimaPrevia = null;
+  let previaAtual = null;
+  let vencimentoMexido = false;
+
+  abrirFormulario({
+    modelo: 'tplFormCobranca',
+    titulo: 'Nova cobrança',
+    textoBotao: 'Gerar cobrança',
+    aoAbrir: function(form) {
+      const seletor = form.elements.empresa_id;
+      preencherSelect(seletor, [{ valor: '', texto: 'Escolha a empresa' }].concat(
+        p.empresas.map(function(e) {
+          return { valor: e.empresa_id, texto: e.nome_empresa + (e.pendente.pedidos ? ' — ' + formatarMoeda(e.pendente.valor) + ' a faturar' : '') };
+        })
+      ), inicial.empresa_id || '');
+
+      form.elements.inicio.value = inicial.inicio || '';
+      form.elements.fim.value = inicial.fim || '';
+      form.elements.fim.max = p.hoje;
+      form.elements.vencimento.min = p.hoje;
+
+      const caixa = form.querySelector('[data-previa]');
+      const botao = form.querySelector('[data-enviar]');
+      botao.disabled = true;
+
+      // Ao escolher a empresa, sugere o período do ciclo dela
+      seletor.addEventListener('change', function() {
+        const empresa = p.empresas.find(function(e) { return e.empresa_id === seletor.value; });
+        if (empresa && empresa.sugestao) {
+          form.elements.inicio.value = empresa.sugestao.inicio;
+          form.elements.fim.value = empresa.sugestao.fim;
+        }
+        vencimentoMexido = false;
+        atualizarPrevia();
+      });
+
+      [form.elements.inicio, form.elements.fim].forEach(function(campo) {
+        campo.addEventListener('change', atualizarPrevia);
+      });
+
+      form.elements.vencimento.addEventListener('change', function() { vencimentoMexido = true; });
+
+      // Desconto (só para quem tem a função liberada)
+      const blocoDesconto = form.querySelector('[data-bloco-desconto]');
+      if (podeFazer('cobrancas_descontos')) {
+        blocoDesconto.hidden = false;
+        ligarCamposDesconto(form, function() { return previaAtual ? previaAtual.valor : 0; }, 0);
+      }
+
+      function atualizarPrevia() {
+        const pedido = {
+          empresa_id: seletor.value,
+          inicio: form.elements.inicio.value,
+          fim: form.elements.fim.value
+        };
+
+        previaAtual = null;
+        botao.disabled = true;
+        caixa.innerHTML = '';
+
+        if (!pedido.empresa_id || !pedido.inicio || !pedido.fim) {
+          caixa.appendChild(el('div', 'nota', 'Escolha a empresa e o período para ver o que entra na cobrança.'));
+          return;
+        }
+
+        ultimaPrevia = pedido;
+        caixa.appendChild(el('div', 'nota', 'Somando os pedidos do período…'));
+
+        apiSessao('previaCobranca', pedido)
+          .then(function(previa) {
+            if (ultimaPrevia !== pedido) return;
+            previaAtual = previa;
+            desenharPrevia(caixa, previa);
+            botao.disabled = !previa.pedidos;
+            if (form.__atualizarDesconto) form.__atualizarDesconto();
+            if (!vencimentoMexido || !form.elements.vencimento.value) form.elements.vencimento.value = previa.vencimento_sugerido;
+          })
+          .catch(function(erro) {
+            if (ultimaPrevia !== pedido) return;
+            caixa.innerHTML = '';
+            caixa.appendChild(criarAlerta(erro.message, { icone: 'erro' }));
+          });
+      }
+
+      atualizarPrevia();
+    },
+    aoEnviar: function(dados) {
+      if (!previaAtual || !previaAtual.pedidos) throw new Error('Não há pedidos para cobrar neste período.');
+      return apiSessao('gerarCobranca', dados);
+    },
+    depois: function(resultado) {
+      depoisDeGravarCobranca(resultado);
+      cobranca.aba = 'cobrancas';
+      cobranca.filtroStatus = 'ABERTAS';
+      renderizarCobrancas();
+      abrirDetalheCobranca(resultado.cobranca_id);
+    }
+  });
+}
+
+function desenharPrevia(caixa, previa) {
+  caixa.innerHTML = '';
+
+  if (!previa.pedidos) {
+    caixa.appendChild(criarAlerta('Não há pedidos sem cobrança de ' + previa.nome_empresa + ' neste período.', { icone: 'alerta' }));
+    return;
+  }
+
+  const resumo = el('div', 'previa-cobranca');
+  const total = el('div', 'previa-total');
+  total.appendChild(el('span', '', quentinhasTexto(previa.quantidade) + ' · ' + previa.pedidos + (previa.pedidos === 1 ? ' pedido' : ' pedidos')));
+  total.appendChild(el('strong', '', formatarMoeda(previa.valor)));
+  resumo.appendChild(total);
+
+  const dias = el('div', 'previa-dias');
+  previa.dias.forEach(function(d) {
+    const linha = el('div', 'previa-dia');
+    linha.appendChild(el('span', '', formatarData(d.data) + ' · ' + d.dia_semana.split('-')[0] + (d.aguardando ? ' · aguardando confirmação' : '')));
+    linha.appendChild(el('span', '', quentinhasTexto(d.quentinhas) + ' · ' + formatarMoeda(d.valor)));
+    dias.appendChild(linha);
+  });
+  resumo.appendChild(dias);
+  caixa.appendChild(resumo);
+
+  if (previa.aguardando) {
+    caixa.appendChild(criarAlerta(previa.aguardando + ' pedido(s) ainda aguardam sua confirmação. Eles entram na cobrança assim mesmo.', { icone: 'alerta' }));
+  }
+}
+
+// ---------- CICLO DA EMPRESA ----------
+function abrirCicloEmpresa(empresa) {
+  abrirFormulario({
+    modelo: 'tplFormCicloCobranca',
+    titulo: 'Cobrança de ' + empresa.nome_empresa,
+    textoBotao: 'Salvar',
+    pequeno: true,
+    aoAbrir: function(form) {
+      form.elements.ciclo_cobranca.value = empresa.ciclo_cobranca;
+      form.elements.dias_vencimento.value = empresa.dias_vencimento;
+    },
+    aoEnviar: function(dados) {
+      dados.empresa_id = empresa.empresa_id;
+      return apiSessao('salvarConfigCobrancaEmpresa', dados);
+    },
+    depois: depoisDeGravarCobranca
+  });
+}
+
+// ---------- DADOS PARA PAGAMENTO ----------
+function abrirDadosPagamento() {
+  abrirFormulario({
+    modelo: 'tplFormDadosPagamento',
+    titulo: 'Dados para pagamento',
+    textoBotao: 'Salvar',
+    aoAbrir: function(form) {
+      form.elements.instrucoes.value = (cobranca.painel && cobranca.painel.instrucoes_pagamento) || '';
+    },
+    aoEnviar: function(dados) {
+      return apiSessao('salvarInstrucoesPagamento', dados.instrucoes);
+    },
+    depois: function(resultado) {
+      if (cobranca.painel) cobranca.painel.instrucoes_pagamento = resultado.instrucoes_pagamento;
+      avisar(resultado.mensagem, 'sucesso');
+      if (estado.telaAtual === 'cobrancas') renderizarCobrancas();
+    }
+  });
+}
+
+// ================================================================
+// DETALHE (restaurante e empresa)
+// ================================================================
+function abrirDetalheCobranca(cobrancaId) {
+  const corpo = el('div', 'detalhe-cobranca');
+  mostrarCarregandoLista(corpo, 3);
+  abrirModal('Cobrança', corpo, { largo: true });
+
+  apiSessao('detalharCobranca', cobrancaId)
+    .then(function(d) {
+      if (!document.body.contains(corpo)) return;   // a janela já foi fechada
+      $('modalTitulo').textContent = 'Cobrança ' + numeroCobranca(d.cobranca.numero);
+      desenharDetalheCobranca(corpo, d);
+    })
+    .catch(function(erro) {
+      if (!document.body.contains(corpo)) return;
+      mostrarErroLista(corpo, erro.message, function() { abrirDetalheCobranca(cobrancaId); });
+    });
+}
+
+function desenharDetalheCobranca(corpo, d) {
+  const c = d.cobranca;
+  const restaurante = estado.usuario.perfil === 'admin';
+  corpo.innerHTML = '';
+
+  const topo = el('div', 'detalhe-cobranca-topo');
+  const textos = el('div');
+  textos.appendChild(el('h3', '', c.nome_empresa));
+  textos.appendChild(el('div', 'secundario', 'Período ' + periodoCobranca(c) + ' · emitida em ' + formatarData(c.data_emissao)));
+  topo.appendChild(textos);
+  topo.appendChild(etiquetaCobranca(c));
+  corpo.appendChild(topo);
+
+  if (c.status === 'CANCELADA') {
+    corpo.appendChild(criarAlerta('Cobrança cancelada' + (c.motivo_cancelamento ? ': ' + c.motivo_cancelamento : '.') +
+      ' Os pedidos dela voltaram para "A faturar".', { icone: 'alerta' }));
+  }
+
+  // Valores
+  const valores = el('div', 'valores-cobranca');
+  [
+    c.desconto
+      ? { rotulo: 'Valor a pagar', valor: formatarMoeda(c.valor_liquido), detalhe: formatarMoeda(c.valor_total) + ' − desconto ' + formatarMoeda(c.desconto) }
+      : { rotulo: 'Valor total', valor: formatarMoeda(c.valor_total), detalhe: quentinhasTexto(c.quantidade_total) },
+    { rotulo: 'Pago', valor: formatarMoeda(c.valor_pago), detalhe: d.pagamentos.length + (d.pagamentos.length === 1 ? ' pagamento' : ' pagamentos') },
+    { rotulo: 'Saldo', valor: formatarMoeda(c.saldo), detalhe: c.status === 'PAGA' || c.status === 'CANCELADA'
+      ? 'vencimento ' + formatarData(c.data_vencimento)
+      : formatarData(c.data_vencimento) + ' · ' + diasAteTexto(c.data_vencimento), destaque: c.vencida }
+  ].forEach(function(v) {
+    const bloco = el('div', 'valor-cobranca' + (v.destaque ? ' vencida' : ''));
+    bloco.appendChild(el('span', '', v.rotulo));
+    bloco.appendChild(el('strong', '', v.valor));
+    bloco.appendChild(el('small', '', v.detalhe));
+    valores.appendChild(bloco);
+  });
+  corpo.appendChild(valores);
+
+  if (c.desconto) {
+    corpo.appendChild(criarAlerta('Desconto de ' + formatarMoeda(c.desconto) +
+      (c.motivo_desconto ? ': ' + c.motivo_desconto : '') + '.', { tipo: 'info', icone: 'desconto' }));
+  }
+  if (c.observacoes) corpo.appendChild(el('p', 'nota', 'Observação: ' + c.observacoes));
+
+  // Ações
+  const acoes = el('div', 'detalhe-cobranca-acoes');
+  acoes.appendChild(criarBotao('PDF / Imprimir', {
+    icone: 'imprimir', titulo: 'Extrato para enviar à empresa ou salvar como PDF',
+    aoClicar: function() { imprimirExtratoCobranca(d); }
+  }));
+
+  if (restaurante && c.status === 'CANCELADA' && estado.usuario.proprietario) {
+    acoes.appendChild(criarBotao('Apagar cobrança', {
+      classe: 'botao-secundario botao-texto-perigo', icone: 'lixeira',
+      titulo: 'Apagar de vez esta cobrança cancelada',
+      aoClicar: function(evento) { apagarCobrancaCancelada(c, evento.currentTarget); }
+    }));
+  }
+
+  if (restaurante && c.status !== 'CANCELADA') {
+    if (c.saldo > 0 && podeFazer('cobrancas_pagamentos')) {
+      acoes.appendChild(criarBotao('Registrar pagamento', {
+        classe: 'botao-primario', icone: 'check',
+        aoClicar: function() { abrirRegistrarPagamento(d); }
+      }));
+    }
+    if (podeFazer('cobrancas_descontos')) {
+      acoes.appendChild(criarBotao(c.desconto ? 'Alterar desconto' : 'Desconto', {
+        icone: 'desconto', aoClicar: function() { abrirDescontoCobranca(d); }
+      }));
+    }
+    if (podeFazer('cobrancas_gerar')) {
+      acoes.appendChild(criarBotao('Vencimento e observação', {
+        icone: 'editar', aoClicar: function() { abrirEditarCobranca(d); }
+      }));
+    }
+    if (!d.pagamentos.length && podeFazer('cobrancas_gerar')) {
+      acoes.appendChild(criarBotao('Cancelar cobrança', {
+        classe: 'botao-secundario botao-texto-perigo', icone: 'lixeira',
+        aoClicar: function() { abrirCancelarCobranca(d); }
+      }));
+    }
+  }
+  corpo.appendChild(acoes);
+
+  // Pagamentos
+  corpo.appendChild(el('h4', 'detalhe-cobranca-secao', 'Pagamentos'));
+  const pagamentos = el('div');
+  renderizarLista(pagamentos, {
+    itens: d.pagamentos,
+    vazio: { icone: 'cobranca', titulo: 'Nenhum pagamento registrado', texto: c.status === 'CANCELADA' ? '' : 'Saldo de ' + formatarMoeda(c.saldo) + '.' },
+    colunas: [
+      { titulo: 'Data', valor: function(pg) { return textoDuplo(formatarData(pg.data_pagamento), [pg.comprovante, pg.observacoes].filter(Boolean).join(' · ')); } },
+      { titulo: 'Forma', largura: '130px', valor: function(pg) { return pg.forma_texto; } },
+      { titulo: 'Valor', largura: '130px', valor: function(pg) { return el('strong', '', formatarMoeda(pg.valor_pago)); } }
+    ],
+    larguraAcoes: restaurante && c.status !== 'CANCELADA' && podeFazer('cobrancas_pagamentos') ? '60px' : undefined,
+    acoes: restaurante && c.status !== 'CANCELADA' && podeFazer('cobrancas_pagamentos') ? function(pg) {
+      const botao = criarBotao('', {
+        classe: 'botao-icone', icone: 'lixeira', titulo: 'Excluir este pagamento (lançado por engano)',
+        aoClicar: function() { excluirPagamentoCobranca(pg, c.cobranca_id, botao); }
+      });
+      return [botao];
+    } : null
+  });
+  corpo.appendChild(pagamentos);
+
+  // Consumo
+  const consumo = d.consumo;
+  if (consumo.por_dia.length) {
+    corpo.appendChild(el('h4', 'detalhe-cobranca-secao', 'Consumo por dia'));
+    const dias = el('div');
+    renderizarLista(dias, {
+      itens: consumo.por_dia,
+      colunas: [
+        { titulo: 'Dia', valor: function(x) { return textoDuplo(formatarData(x.data), x.dia_semana); } },
+        { titulo: 'Quentinhas', largura: '110px', valor: function(x) { return x.quentinhas; } },
+        { titulo: 'Valor', largura: '130px', valor: function(x) { return el('strong', '', formatarMoeda(x.valor)); } }
+      ]
+    });
+    corpo.appendChild(dias);
+
+    corpo.appendChild(el('h4', 'detalhe-cobranca-secao', 'Consumo por pessoa'));
+    const pessoas = el('div');
+    renderizarLista(pessoas, {
+      itens: consumo.por_funcionario,
+      colunas: [
+        { titulo: 'Nome', valor: function(x) {
+          return textoDuplo(x.nome, [x.setor, x.matricula ? 'Matr. ' + x.matricula : '', x.avulsa ? 'Avulsa' : ''].filter(Boolean).join(' · '));
+        } },
+        { titulo: 'Dias', largura: '70px', valor: function(x) { return x.dias; } },
+        { titulo: 'Quentinhas', largura: '110px', valor: function(x) { return x.quentinhas; } },
+        { titulo: 'Valor', largura: '130px', valor: function(x) { return el('strong', '', formatarMoeda(x.valor)); } }
+      ]
+    });
+    corpo.appendChild(pessoas);
+  }
+
+  if (d.instrucoes_pagamento && c.status !== 'CANCELADA' && c.status !== 'PAGA') {
+    corpo.appendChild(el('h4', 'detalhe-cobranca-secao', 'Dados para pagamento'));
+    corpo.appendChild(el('div', 'instrucoes-pagamento', d.instrucoes_pagamento));
+  }
+
+  preencherIcones(corpo);
+}
+
+// Depois de uma gravação feita a partir do detalhe: atualiza o painel e reabre o detalhe
+function depoisDeGravarNoDetalhe(cobrancaId) {
+  return function(resultado) {
+    depoisDeGravarCobranca(resultado);
+    abrirDetalheCobranca(cobrancaId);
+  };
+}
+
+function abrirRegistrarPagamento(d) {
+  const c = d.cobranca;
+  abrirFormulario({
+    modelo: 'tplFormPagamento',
+    titulo: 'Pagamento · ' + numeroCobranca(c.numero),
+    textoBotao: 'Registrar pagamento',
+    aoAbrir: function(form) {
+      form.querySelector('[data-descricao]').textContent =
+        c.nome_empresa + ' · saldo em aberto ' + formatarMoeda(c.saldo) + '. Para pagamento parcial, informe só o valor recebido.';
+      form.elements.data.value = hojeTexto();
+      form.elements.data.max = hojeTexto();
+      form.elements.valor.value = aplicarMascara(String(Math.round(c.saldo * 100)), 'moeda');
+      preencherSelect(form.elements.forma, FORMAS_PAGAMENTO_TELA.map(function(f) { return { valor: f.id, texto: f.texto }; }), 'PIX');
+    },
+    aoEnviar: function(dados) {
+      dados.cobranca_id = c.cobranca_id;
+      return apiSessao('registrarPagamento', dados);
+    },
+    depois: depoisDeGravarNoDetalhe(c.cobranca_id)
+  });
+}
+
+function abrirEditarCobranca(d) {
+  const c = d.cobranca;
+  abrirFormulario({
+    modelo: 'tplFormEditarCobranca',
+    titulo: 'Cobrança ' + numeroCobranca(c.numero),
+    textoBotao: 'Salvar',
+    pequeno: true,
+    aoAbrir: function(form) {
+      form.elements.vencimento.value = c.data_vencimento;
+      form.elements.vencimento.min = c.data_emissao;
+      form.elements.observacoes.value = c.observacoes || '';
+    },
+    aoEnviar: function(dados) {
+      dados.cobranca_id = c.cobranca_id;
+      return apiSessao('editarCobranca', dados);
+    },
+    depois: depoisDeGravarNoDetalhe(c.cobranca_id)
+  });
+}
+
+function abrirCancelarCobranca(d) {
+  const c = d.cobranca;
+  abrirFormulario({
+    modelo: 'tplFormCancelarCobranca',
+    titulo: 'Cancelar cobrança ' + numeroCobranca(c.numero),
+    textoBotao: 'Cancelar cobrança',
+    pequeno: true,
+    aoAbrir: function(form) {
+      form.querySelector('[data-descricao]').textContent =
+        'Os ' + c.quantidade_pedidos + ' pedido(s) de ' + periodoCobranca(c) + ' voltam para "A faturar" e poderão entrar numa nova cobrança.';
+    },
+    aoEnviar: function(dados) {
+      return apiSessao('cancelarCobranca', c.cobranca_id, dados.motivo);
+    },
+    depois: depoisDeGravarNoDetalhe(c.cobranca_id)
+  });
+}
+
+function apagarCobrancaCancelada(c, botao) {
+  confirmar({
+    titulo: 'Apagar cobrança ' + numeroCobranca(c.numero),
+    mensagem: 'Apagar de vez esta cobrança cancelada de ' + c.nome_empresa + '? Ela some da lista. ' +
+      'O número ' + numeroCobranca(c.numero) + ' não será usado de novo. Esta ação não pode ser desfeita.',
+    textoBotao: 'Apagar',
+    perigo: true
+  }).then(function(sim) {
+    if (!sim) return;
+
+    comCarregamento(botao, apiSessao('excluirCobrancaCancelada', c.cobranca_id))
+      .then(function(resultado) {
+        fecharModal();
+        depoisDeGravarCobranca(resultado);
+      })
+      .catch(function(erro) { avisar(erro.message, 'erro'); });
+  });
+}
+
+// ---------- DESCONTO ----------
+// Liga os campos de desconto: mostra na hora quanto fica o valor
+function ligarCamposDesconto(form, valorBase, jaPago) {
+  const tipo = form.elements.desconto_tipo;
+  const campo = form.elements.desconto_valor;
+  const resultado = form.querySelector('[data-resultado-desconto]');
+
+  function numero() {
+    let texto = String(campo.value || '').replace(/[R$%\s]/g, '');
+    if (texto.indexOf(',') !== -1) texto = texto.replace(/\./g, '').replace(',', '.');
+    const n = Number(texto);
+    return isFinite(n) && n > 0 ? n : 0;
+  }
+
+  function atualizar() {
+    const base = valorBase();
+    const n = numero();
+    campo.placeholder = tipo.value === 'PERCENTUAL' ? '10' : '0,00';
+    if (!n || !base) { resultado.textContent = base ? 'Sem desconto: ' + formatarMoeda(base) + '.' : ''; return; }
+    const desconto = tipo.value === 'PERCENTUAL' ? Math.round(base * n) / 100 : n;
+    if (desconto > base) { resultado.textContent = 'O desconto é maior que o valor (' + formatarMoeda(base) + ').'; return; }
+    resultado.textContent = formatarMoeda(base) + ' − ' + formatarMoeda(desconto) + ' = ' + formatarMoeda(base - desconto) + ' a pagar' +
+      (jaPago ? ' (já pago ' + formatarMoeda(jaPago) + ')' : '') + '.';
+  }
+
+  tipo.addEventListener('change', atualizar);
+  campo.addEventListener('input', atualizar);
+  form.__atualizarDesconto = atualizar;
+  atualizar();
+}
+
+function abrirDescontoCobranca(d) {
+  const c = d.cobranca;
+  abrirFormulario({
+    modelo: 'tplFormDesconto',
+    titulo: 'Desconto · ' + numeroCobranca(c.numero),
+    textoBotao: 'Aplicar desconto',
+    pequeno: true,
+    aoAbrir: function(form) {
+      form.querySelector('[data-descricao]').textContent =
+        c.nome_empresa + ' · pedidos de ' + periodoCobranca(c) + ': ' + formatarMoeda(c.valor_total) + '.';
+
+      if (c.desconto) {
+        form.elements.desconto_tipo.value = 'VALOR';
+        form.elements.desconto_valor.value = String(c.desconto.toFixed(2)).replace('.', ',');
+        form.elements.desconto_motivo.value = c.motivo_desconto || '';
+
+        const remover = form.querySelector('[data-remover-desconto]');
+        remover.hidden = false;
+        remover.addEventListener('click', function() {
+          comCarregamento(remover, apiSessao('aplicarDescontoCobranca', { cobranca_id: c.cobranca_id, desconto_valor: '' }))
+            .then(function(resultado) {
+              fecharModal();
+              depoisDeGravarNoDetalhe(c.cobranca_id)(resultado);
+            })
+            .catch(function(erro) { avisar(erro.message, 'erro'); });
+        });
+      }
+
+      ligarCamposDesconto(form, function() { return c.valor_total; }, c.valor_pago);
+    },
+    aoEnviar: function(dados) {
+      if (!String(dados.desconto_valor || '').trim()) throw new Error('Informe o valor do desconto.');
+      dados.cobranca_id = c.cobranca_id;
+      return apiSessao('aplicarDescontoCobranca', dados);
+    },
+    depois: depoisDeGravarNoDetalhe(c.cobranca_id)
+  });
+}
+
+function excluirPagamentoCobranca(pg, cobrancaId, botao) {
+  confirmar({
+    titulo: 'Excluir pagamento',
+    mensagem: 'Excluir o pagamento de ' + formatarMoeda(pg.valor_pago) + ' de ' + formatarData(pg.data_pagamento) +
+      '? O valor volta a ficar em aberto na cobrança.',
+    textoBotao: 'Excluir',
+    perigo: true
+  }).then(function(ok) {
+    if (!ok) return;
+    comCarregamento(botao, apiSessao('excluirPagamento', pg.pagamento_id))
+      .then(depoisDeGravarNoDetalhe(cobrancaId))
+      .catch(function(erro) { avisar(erro.message, 'erro'); });
+  });
+}
+
+// ================================================================
+// EXTRATO EM PDF (pela janela de impressão do navegador)
+// ================================================================
+function imprimirExtratoCobranca(d) {
+  const c = d.cobranca;
+  const area = $('areaImpressao');
+  area.innerHTML = '';
+
+  function tabela(titulos, linhas, total, numericas) {
+    const t = el('table', 'imp-tabela imp-tabela-relatorio');
+    const cabeca = el('tr');
+    titulos.forEach(function(titulo, i) { cabeca.appendChild(el('th', numericas.indexOf(i) !== -1 ? 'num' : '', titulo)); });
+    t.appendChild(el('thead')).appendChild(cabeca);
+    const corpo = el('tbody');
+    linhas.concat(total ? [total] : []).forEach(function(valores, indice) {
+      const linha = el('tr', total && indice === linhas.length ? 'imp-total' : '');
+      valores.forEach(function(valor, i) { linha.appendChild(el('td', numericas.indexOf(i) !== -1 ? 'num' : '', valor)); });
+      corpo.appendChild(linha);
+    });
+    t.appendChild(corpo);
+    return t;
+  }
+
+  const cabecalho = el('div', 'imp-cabecalho');
+  cabecalho.appendChild(el('strong', '', 'Tempero de Mãe · Extrato de cobrança ' + numeroCobranca(c.numero)));
+  cabecalho.appendChild(el('span', '', 'Emitida em ' + formatarData(c.data_emissao) + ' · impresso em ' +
+    new Date(d.gerado_em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })));
+  area.appendChild(cabecalho);
+
+  const resumo = el('section', 'imp-resumo');
+  const topo = el('div', 'imp-pedido-topo');
+  const textos = el('div');
+  textos.appendChild(el('h2', '', c.nome_empresa));
+  if (d.empresa) {
+    const dados = [d.empresa.cnpj ? 'CNPJ ' + d.empresa.cnpj : '', d.empresa.endereco, d.empresa.telefone, d.empresa.email].filter(Boolean);
+    if (dados.length) textos.appendChild(el('p', 'imp-detalhe', dados.join(' · ')));
+  }
+  textos.appendChild(el('p', 'imp-detalhe', 'Período: ' + periodoCobranca(c) + ' · Vencimento: ' + formatarData(c.data_vencimento) +
+    ' · Situação: ' + textoSituacaoCobranca(c)));
+  topo.appendChild(textos);
+  const caixa = el('div', 'imp-quantidade');
+  caixa.appendChild(el('strong', '', formatarMoeda(c.saldo > 0 ? c.saldo : c.valor_liquido)));
+  caixa.appendChild(el('span', '', c.saldo > 0 && c.valor_pago ? 'saldo a pagar' : (c.status === 'PAGA' ? 'pago' : 'total a pagar')));
+  topo.appendChild(caixa);
+  resumo.appendChild(topo);
+
+  resumo.appendChild(el('p', 'imp-contagem',
+    quentinhasTexto(c.quantidade_total) + '   ·   ' + c.quantidade_pedidos + ' pedido(s)   ·   total ' + formatarMoeda(c.valor_total) +
+    (c.desconto ? '   ·   desconto ' + formatarMoeda(c.desconto) + '   ·   a pagar ' + formatarMoeda(c.valor_liquido) : '') +
+    (c.valor_pago ? '   ·   pago ' + formatarMoeda(c.valor_pago) + '   ·   saldo ' + formatarMoeda(c.saldo) : '')));
+  if (c.desconto) {
+    resumo.appendChild(el('p', 'imp-nota', 'Desconto de ' + formatarMoeda(c.desconto) + (c.motivo_desconto ? ': ' + c.motivo_desconto : '') + '.'));
+  }
+
+  if (c.observacoes) resumo.appendChild(el('p', 'imp-nota', 'Observação: ' + c.observacoes));
+
+  resumo.appendChild(el('h3', 'imp-subtitulo', 'Consumo por dia'));
+  resumo.appendChild(tabela(
+    ['Dia', '', 'Quentinhas', 'Valor'],
+    d.consumo.por_dia.map(function(x) { return [formatarData(x.data), x.dia_semana, x.quentinhas, formatarMoeda(x.valor)]; }),
+    ['Total', '', d.consumo.totais.quentinhas, formatarMoeda(d.consumo.totais.valor)],
+    [2, 3]
+  ));
+  if (c.desconto) {
+    resumo.appendChild(tabela(
+      ['', '', '', ''],
+      [['Desconto', '', '', '− ' + formatarMoeda(c.desconto)]],
+      ['Valor a pagar', '', '', formatarMoeda(c.valor_liquido)],
+      [3]
+    ));
+  }
+
+  if (d.pagamentos.length) {
+    resumo.appendChild(el('h3', 'imp-subtitulo', 'Pagamentos recebidos'));
+    resumo.appendChild(tabela(
+      ['Data', 'Forma', 'Referência', 'Valor'],
+      d.pagamentos.map(function(pg) { return [formatarData(pg.data_pagamento), pg.forma_texto, pg.comprovante || '–', formatarMoeda(pg.valor_pago)]; }),
+      ['Total pago', '', '', formatarMoeda(c.valor_pago)],
+      [3]
+    ));
+  }
+
+  if (d.instrucoes_pagamento && c.saldo > 0) {
+    resumo.appendChild(el('h3', 'imp-subtitulo', 'Dados para pagamento'));
+    resumo.appendChild(el('p', 'imp-instrucoes', d.instrucoes_pagamento));
+  }
+  area.appendChild(resumo);
+
+  // Consumo por pessoa (nova folha)
+  if (d.consumo.por_funcionario.length) {
+    const secao = el('section', 'imp-pedido imp-nova-folha');
+    const topoPessoas = el('div', 'imp-pedido-topo');
+    const textosPessoas = el('div');
+    textosPessoas.appendChild(el('h2', '', c.nome_empresa));
+    textosPessoas.appendChild(el('p', 'imp-detalhe', 'Consumo por pessoa · ' + numeroCobranca(c.numero) + ' · ' + periodoCobranca(c)));
+    topoPessoas.appendChild(textosPessoas);
+    secao.appendChild(topoPessoas);
+
+    secao.appendChild(tabela(
+      ['Nome', 'Setor', 'Matrícula', 'Dias', 'Quentinhas', 'Valor'],
+      d.consumo.por_funcionario.map(function(x) {
+        return [x.nome + (x.avulsa ? ' (avulsa)' : ''), x.setor || '–', x.matricula || '–', x.dias, x.quentinhas, formatarMoeda(x.valor)];
+      }),
+      ['Total', '', '', d.consumo.totais.dias, d.consumo.totais.quentinhas, formatarMoeda(d.consumo.totais.valor)],
+      [3, 4, 5]
+    ));
+    area.appendChild(secao);
+  }
+
+  setTimeout(function() { window.print(); }, 60);
+}
+
+// ================================================================
+// EMPRESA: MINHAS COBRANÇAS
+// ================================================================
+TELAS['cobrancas-empresa'] = { carregar: carregarCobrancasEmpresa };
+
+function carregarCobrancasEmpresa() {
+  const tinhaDados = !!cobranca.doPortal;
+
+  if (tinhaDados) {
+    renderizarCobrancasEmpresa();
+  } else {
+    mostrarCarregandoLista($('cobrancasEmpresaConteudo'), 3);
+  }
+
+  if (tinhaDados && recente(cobranca.doPortalEm)) return;
+
+  apiSessao('listarCobrancasEmpresa')
+    .then(function(r) {
+      cobranca.doPortal = r;
+      cobranca.doPortalEm = Date.now();
+      if (estado.telaAtual === 'cobrancas-empresa') renderizarCobrancasEmpresa();
+    })
+    .catch(function(erro) {
+      falhaAoAtualizar($('cobrancasEmpresaConteudo'), erro, carregarCobrancasEmpresa, tinhaDados);
+    });
+}
+
+function renderizarCobrancasEmpresa() {
+  const r = cobranca.doPortal;
+  const conteudo = $('cobrancasEmpresaConteudo');
+  conteudo.innerHTML = '';
+
+  const indicadores = el('div', 'grade-indicadores');
+  const abertas = r.cobrancas.filter(function(c) { return c.status === 'ABERTA' || c.status === 'PARCIAL'; });
+  indicadores.appendChild(criarIndicador({
+    icone: 'cobranca', rotulo: 'Em aberto', valor: formatarMoeda(r.totais.em_aberto),
+    detalhe: abertas.length ? abertas.length + (abertas.length === 1 ? ' cobrança a pagar' : ' cobranças a pagar') : 'tudo em dia'
+  }));
+  indicadores.appendChild(criarIndicador({
+    icone: 'alerta', cor: r.totais.vencido ? 'amarelo' : 'azul', rotulo: 'Vencido', valor: formatarMoeda(r.totais.vencido),
+    detalhe: r.totais.vencido ? 'fale com o restaurante' : 'nada vencido'
+  }));
+  indicadores.appendChild(criarIndicador({
+    icone: 'pedido', cor: 'azul', rotulo: 'Consumo ainda não cobrado', valor: formatarMoeda(r.totais.a_faturar),
+    detalhe: r.totais.quentinhas_a_faturar
+      ? quentinhasTexto(r.totais.quentinhas_a_faturar) + ' desde ' + formatarData(r.totais.desde)
+      : 'entra na próxima cobrança'
+  }));
+  conteudo.appendChild(indicadores);
+
+  const lista = el('div');
+  renderizarLista(lista, {
+    itens: r.cobrancas,
+    vazio: { icone: 'cobranca', titulo: 'Nenhuma cobrança ainda', texto: 'Quando o restaurante fechar um período, a cobrança aparece aqui.' },
+    colunas: [
+      { titulo: 'Período', valor: function(c) { return textoDuplo(periodoCobranca(c), numeroCobranca(c.numero) + ' · ' + quentinhasTexto(c.quantidade_total)); } },
+      { titulo: 'Vencimento', largura: '140px', valor: function(c) {
+        if (c.status === 'PAGA') return formatarData(c.data_vencimento);
+        return textoDuplo(formatarData(c.data_vencimento), diasAteTexto(c.data_vencimento));
+      } },
+      { titulo: 'Valor', largura: '130px', valor: function(c) {
+        return textoDuplo(formatarMoeda(c.valor_liquido), c.status === 'PARCIAL' ? 'falta ' + formatarMoeda(c.saldo)
+          : (c.desconto ? 'com desconto de ' + formatarMoeda(c.desconto) : ''));
+      } },
+      { titulo: 'Situação', largura: '150px', valor: etiquetaCobranca }
+    ],
+    larguraAcoes: '110px',
+    acoes: function(c) {
+      return [criarBotao('Abrir', { icone: 'olho', aoClicar: function() { abrirDetalheCobranca(c.cobranca_id); } })];
+    }
+  });
+  conteudo.appendChild(lista);
+
+  if (r.instrucoes_pagamento && abertas.length) {
+    const caixa = el('div', 'cartao instrucoes-cartao');
+    caixa.appendChild(el('h3', '', 'Dados para pagamento'));
+    caixa.appendChild(el('div', 'instrucoes-pagamento', r.instrucoes_pagamento));
+    conteudo.appendChild(caixa);
+  }
+
+  preencherIcones(conteudo);
+}
+</script>

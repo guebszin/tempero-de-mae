@@ -1,0 +1,351 @@
+<script>
+// ================================================================
+// SCRIPTSISTEMA.html — Sistema › Configurações (só o proprietário)
+// e a janela do convite de primeiro acesso das empresas.
+// ================================================================
+
+const sistema = {
+  dados: null,
+  dadosEm: 0
+};
+
+const NOMES_ESCOLHA = {
+  PERSONALIZADOS: 'Só quem personaliza escolhe',
+  TODOS: 'Todos escolhem',
+  NINGUEM: 'Só quentinha do dia'
+};
+
+AO_SAIR.push(function() {
+  sistema.dados = null;
+  sistema.dadosEm = 0;
+});
+
+TELAS['configuracoes'] = { carregar: carregarConfiguracoes };
+
+function carregarConfiguracoes() {
+  const conteudo = $('configuracoesConteudo');
+  const tinhaDados = !!sistema.dados;
+
+  if (tinhaDados) renderizarConfiguracoes();
+  else mostrarCarregandoLista(conteudo, 3);
+
+  if (tinhaDados && recente(sistema.dadosEm)) return;
+
+  apiSessao('obterConfiguracoes')
+    .then(receberConfiguracoes)
+    .catch(function(erro) {
+      falhaAoAtualizar(conteudo, erro, carregarConfiguracoes, tinhaDados);
+    });
+}
+
+function receberConfiguracoes(dados) {
+  sistema.dados = dados;
+  sistema.dadosEm = Date.now();
+  if (estado.telaAtual === 'configuracoes') renderizarConfiguracoes();
+}
+
+// Depois de gravar: atualiza a tela e os menus do próprio restaurante
+function depoisDeGravarConfiguracao(resposta) {
+  receberConfiguracoes(resposta.configuracoes);
+  aplicarRecursos({ cobrancas: resposta.configuracoes.modulos.cobrancas });
+  avisar(resposta.mensagem, 'sucesso');
+}
+
+function resumoConfig(config) {
+  return [
+    NOMES_ESCOLHA[config.escolha],
+    config.mostrar_precos ? 'vê preços' : 'preços ocultos',
+    config.cobrancas ? 'com cobrança' : 'sem cobrança',
+    config.avulsas ? 'avulsas liberadas' : 'sem avulsas'
+  ].join(' · ');
+}
+
+function renderizarConfiguracoes() {
+  const d = sistema.dados;
+  const conteudo = $('configuracoesConteudo');
+  conteudo.innerHTML = '';
+
+  // ---- Módulos do sistema ----
+  const modulos = el('div', 'cartao cartao-config');
+  modulos.appendChild(el('h3', '', 'Funções do sistema'));
+  modulos.appendChild(el('p', 'texto-apoio', 'Valem para o restaurante e para todas as empresas.'));
+
+  const cobrancas = el('label', 'opcao-checkbox');
+  const marcar = el('input');
+  marcar.type = 'checkbox';
+  marcar.checked = d.modulos.cobrancas;
+  cobrancas.appendChild(marcar);
+  const textos = el('div');
+  textos.appendChild(el('strong', '', 'Cobranças'));
+  textos.appendChild(el('span', '', d.modulos.cobrancas
+    ? 'Ligado: aparece no menu do restaurante e das empresas com cobrança ligada.'
+    : 'Desligado: a tela de cobranças some para todos. Nada é apagado.'));
+  cobrancas.appendChild(textos);
+  modulos.appendChild(cobrancas);
+
+  marcar.addEventListener('change', function() {
+    const ligar = marcar.checked;
+    const continuar = ligar ? Promise.resolve(true) : confirmar({
+      titulo: 'Desligar as cobranças?',
+      mensagem: 'A tela de cobranças some para o restaurante e para todas as empresas. As cobranças já geradas continuam guardadas e voltam a aparecer se você ligar de novo.',
+      textoBotao: 'Desligar'
+    });
+
+    continuar.then(function(sim) {
+      if (!sim) { marcar.checked = !ligar; return; }
+      marcar.disabled = true;
+      apiSessao('salvarModulos', { cobrancas: ligar })
+        .then(depoisDeGravarConfiguracao)
+        .catch(function(erro) {
+          marcar.checked = !ligar;
+          marcar.disabled = false;
+          avisar(erro.message, 'erro');
+        });
+    });
+  });
+  conteudo.appendChild(modulos);
+
+  // ---- Padrão das empresas ----
+  const padrao = el('div', 'cartao cartao-config');
+  const topoPadrao = el('div', 'cartao-config-topo');
+  const textosPadrao = el('div');
+  textosPadrao.appendChild(el('h3', '', 'Padrão das empresas'));
+  textosPadrao.appendChild(el('p', 'texto-apoio', 'Vale para as empresas sem configuração própria, inclusive as novas.'));
+  topoPadrao.appendChild(textosPadrao);
+  topoPadrao.appendChild(criarBotao('Editar padrão', {
+    icone: 'editar',
+    aoClicar: function() { abrirFormConfig(null); }
+  }));
+  padrao.appendChild(topoPadrao);
+  padrao.appendChild(el('p', 'resumo-config', resumoConfig(d.padrao)));
+  conteudo.appendChild(padrao);
+
+  // ---- Por empresa ----
+  const porEmpresa = el('div', 'cartao cartao-config');
+  porEmpresa.appendChild(el('h3', '', 'Por empresa'));
+  porEmpresa.appendChild(el('p', 'texto-apoio', 'Use quando uma empresa precisa funcionar diferente do padrão.'));
+  const lista = el('div');
+  renderizarLista(lista, {
+    itens: d.empresas,
+    apagada: function(e) { return e.status !== 'ATIVO'; },
+    vazio: { icone: 'empresa', titulo: 'Nenhuma empresa cadastrada', texto: 'Cadastre empresas na tela Empresas.' },
+    colunas: [
+      { titulo: 'Empresa', valor: function(e) { return textoDuplo(e.nome_empresa, resumoConfig(e.config)); } },
+      { titulo: 'Configuração', largura: '160px', valor: function(e) {
+        return e.config.usa_padrao ? criarEtiqueta('Padrão', 'cinza') : criarEtiqueta('Própria', 'azul');
+      } }
+    ],
+    larguraAcoes: '140px',
+    acoes: function(e) {
+      return [criarBotao('Configurar', { icone: 'ajustes', aoClicar: function() { abrirFormConfig(e); } })];
+    }
+  });
+  porEmpresa.appendChild(lista);
+  conteudo.appendChild(porEmpresa);
+
+  // ---- Mensagem do convite ----
+  const convite = el('div', 'cartao cartao-config');
+  convite.appendChild(el('h3', '', 'Mensagem do convite'));
+  convite.appendChild(el('p', 'texto-apoio',
+    'Texto que vem pronto para enviar quando você cadastra uma empresa. Use {responsavel}, {empresa}, {usuario}, {link}, {validade} e {endereco}: ' +
+    'eles são trocados pelos dados de cada empresa. O {link} é obrigatório. O convite vale ' + d.validade_convite_dias + ' dias.'));
+
+  const campo = el('div', 'campo');
+  const texto = el('textarea');
+  texto.rows = 10;
+  texto.maxLength = 1500;
+  texto.value = d.modelo_convite;
+  campo.appendChild(texto);
+  convite.appendChild(campo);
+
+  const acoes = el('div', 'acoes-config');
+  acoes.appendChild(criarBotao('Voltar ao texto padrão', {
+    aoClicar: function() { texto.value = d.modelo_convite_padrao; }
+  }));
+  const salvar = criarBotao('Salvar mensagem', {
+    classe: 'botao-primario', icone: 'check',
+    aoClicar: function() {
+      comCarregamento(salvar, apiSessao('salvarModeloConvite', texto.value))
+        .then(depoisDeGravarConfiguracao)
+        .catch(function(erro) { avisar(erro.message, 'erro'); });
+    }
+  });
+  acoes.appendChild(salvar);
+  convite.appendChild(acoes);
+  conteudo.appendChild(convite);
+
+  // ---- Limpeza (apagar registros cancelados) ----
+  if (d.limpeza) conteudo.appendChild(criarCartaoLimpeza(d.limpeza));
+
+  preencherIcones(conteudo);
+}
+
+// Formulário da configuração (empresa = null: o padrão)
+function abrirFormConfig(empresa) {
+  const d = sistema.dados;
+
+  abrirFormulario({
+    modelo: 'tplFormConfigEmpresa',
+    titulo: empresa ? 'Configurar ' + empresa.nome_empresa : 'Padrão das empresas',
+    textoBotao: 'Salvar',
+    aoAbrir: function(form) {
+      const opcoes = form.querySelector('[data-opcoes]');
+      const usarPadrao = form.elements.usa_padrao;
+
+      function preencher(config) {
+        form.elements.escolha.value = config.escolha;
+        form.elements.mostrar_precos.checked = config.mostrar_precos;
+        form.elements.cobrancas.checked = config.cobrancas;
+        form.elements.avulsas.checked = config.avulsas;
+      }
+
+      function atualizar() {
+        const travado = !!empresa && usarPadrao.checked;
+        opcoes.classList.toggle('desativado', travado);
+        opcoes.querySelectorAll('input, select').forEach(function(campo) { campo.disabled = travado; });
+        if (travado) preencher(d.padrao);
+        if (!d.modulos.cobrancas) {
+          form.elements.cobrancas.checked = false;
+          form.elements.cobrancas.disabled = true;
+        }
+      }
+
+      if (empresa) {
+        form.querySelector('[data-texto-padrao]').textContent = 'Hoje o padrão é: ' + resumoConfig(d.padrao) + '.';
+        usarPadrao.checked = empresa.config.usa_padrao;
+        preencher(empresa.config);
+        usarPadrao.addEventListener('change', atualizar);
+      } else {
+        form.querySelector('[data-usar-padrao]').remove();
+        preencher(d.padrao);
+      }
+
+      if (!d.modulos.cobrancas) {
+        const aviso = el('div', 'nota', 'As cobranças estão desligadas para todo o sistema. Ligue em “Funções do sistema” para usar por empresa.');
+        form.elements.cobrancas.closest('label').after(aviso);
+      }
+
+      atualizar();
+    },
+    aoEnviar: function(dados, form) {
+      const config = {
+        escolha: form.elements.escolha.value,
+        mostrar_precos: form.elements.mostrar_precos.checked,
+        cobrancas: d.modulos.cobrancas ? form.elements.cobrancas.checked : (empresa ? empresa.config : d.padrao).cobrancas,
+        avulsas: form.elements.avulsas.checked
+      };
+
+      if (!empresa) return apiSessao('salvarPadraoEmpresas', config);
+      return apiSessao('salvarConfigEmpresa', empresa.empresa_id, form.elements.usa_padrao.checked ? null : config);
+    },
+    depois: depoisDeGravarConfiguracao
+  });
+}
+
+// ================================================================
+// CONVITE: link + mensagem pronta para enviar à empresa
+// ================================================================
+function linkWhatsapp(telefone, texto) {
+  let numero = String(telefone || '').replace(/\D/g, '');
+  if (numero.length === 10 || numero.length === 11) numero = '55' + numero;
+  return 'https://wa.me/' + (numero.length >= 12 ? numero : '') + '?text=' + encodeURIComponent(texto);
+}
+
+function mostrarConviteEmpresa(convite, descricao) {
+  const caixa = clonarModelo('tplConvite');
+  const mensagem = caixa.querySelector('[data-mensagem]');
+  const whatsapp = caixa.querySelector('[data-whatsapp]');
+  const email = caixa.querySelector('[data-email]');
+
+  caixa.querySelector('[data-descricao]').textContent = convite.teste
+    ? 'Modo teste: este convite é só para ver como fica. O link não funciona e é apagado ao sair do teste.'
+    : descricao;
+  caixa.querySelector('[data-usuario]').textContent = convite.usuario;
+  caixa.querySelector('[data-link]').textContent = convite.link;
+  caixa.querySelector('[data-validade]').textContent = convite.validade;
+  mensagem.value = convite.mensagem;
+
+  function atualizarLinks() {
+    whatsapp.href = linkWhatsapp(convite.telefone, mensagem.value);
+    if (convite.email) {
+      email.href = 'mailto:' + encodeURIComponent(convite.email) +
+        '?subject=' + encodeURIComponent('Acesso ao Tempero de Mãe — ' + convite.nome_empresa) +
+        '&body=' + encodeURIComponent(mensagem.value);
+      email.hidden = false;
+    } else {
+      email.hidden = true;
+    }
+  }
+
+  mensagem.addEventListener('input', atualizarLinks);
+  atualizarLinks();
+
+  caixa.querySelector('[data-cancelar]').addEventListener('click', fecharModal);
+  caixa.querySelector('[data-copiar]').addEventListener('click', function() {
+    copiarTexto(mensagem.value).then(function(ok) {
+      avisar(ok ? 'Mensagem copiada. Agora é só colar no WhatsApp ou no e-mail.' : 'Não foi possível copiar. Selecione o texto manualmente.',
+        ok ? 'sucesso' : 'erro');
+    });
+  });
+
+  abrirModal(convite.nova_senha ? 'Link para nova senha' : 'Convite de primeiro acesso', caixa);
+}
+
+// ----------------------------------------------------------------
+// LIMPEZA: apagar de vez o que já foi cancelado (somente o proprietário)
+// ----------------------------------------------------------------
+function criarCartaoLimpeza(limpeza) {
+  const cartao = el('div', 'cartao cartao-config');
+  cartao.appendChild(el('h3', '', 'Limpeza'));
+  cartao.appendChild(el('p', 'texto-apoio',
+    'Apaga de vez o que já foi cancelado. Pedidos e cobranças válidos nunca são apagados por aqui. ' +
+    'Para apagar um item só, use o botão "Apagar" no próprio pedido, cobrança ou funcionário (inativo).'));
+
+  [
+    {
+      rotulo: 'Pedidos cancelados', quantidade: limpeza.pedidos_cancelados, funcao: 'limparPedidosCancelados',
+      confirmacao: 'Apagar de vez os ' + limpeza.pedidos_cancelados + ' pedido(s) cancelado(s)? Eles somem das listas de pedidos. Esta ação não pode ser desfeita.'
+    },
+    {
+      rotulo: 'Cobranças canceladas', quantidade: limpeza.cobrancas_canceladas, funcao: 'limparCobrancasCanceladas',
+      confirmacao: 'Apagar de vez as ' + limpeza.cobrancas_canceladas + ' cobrança(s) cancelada(s)? Os números delas não serão usados de novo. Esta ação não pode ser desfeita.'
+    }
+  ].forEach(function(item) {
+    const linha = el('div', 'linha-limpeza');
+    const textos = el('div');
+    textos.appendChild(el('strong', '', item.rotulo));
+    textos.appendChild(el('span', '', item.quantidade ? item.quantidade + ' para apagar' : 'Nada para apagar'));
+    linha.appendChild(textos);
+
+    const botao = criarBotao('Apagar todos', {
+      classe: 'botao-secundario botao-pequeno botao-texto-perigo', icone: 'lixeira',
+      aoClicar: function() {
+        confirmar({ titulo: 'Apagar ' + item.rotulo.toLowerCase(), mensagem: item.confirmacao, textoBotao: 'Apagar', perigo: true })
+          .then(function(sim) {
+            if (!sim) return;
+            comCarregamento(botao, apiSessao(item.funcao))
+              .then(function(resposta) {
+                sistema.dados.limpeza = resposta.resumo;
+                // Telas que mostram pedidos ou cobranças buscam de novo
+                if (typeof pedidosAdmin !== 'undefined') pedidosAdmin.dias = {};
+                if (typeof cobranca !== 'undefined') cobranca.painel = null;
+                avisar(resposta.mensagem, 'sucesso');
+                if (estado.telaAtual === 'configuracoes') renderizarConfiguracoes();
+              })
+              .catch(function(erro) { avisar(erro.message, 'erro'); });
+          });
+      }
+    });
+    botao.disabled = !item.quantidade;
+    linha.appendChild(botao);
+    cartao.appendChild(linha);
+  });
+
+  if (limpeza.funcionarios_excluidos) {
+    cartao.appendChild(el('p', 'nota',
+      limpeza.funcionarios_excluidos + ' funcionário(s) apagado(s) até hoje. As quentinhas deles continuam nos relatórios.'));
+  }
+
+  return cartao;
+}
+</script>

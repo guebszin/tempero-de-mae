@@ -1,0 +1,880 @@
+<script>
+// ================================================================
+// SCRIPTRELATORIOS.html — relatórios do restaurante
+// Filtros de período e empresa; resumo; visões por empresa, por dia,
+// por funcionário e por proteína; exportação para Excel e PDF.
+// O Excel (.xlsx) é montado aqui mesmo no navegador, sem serviços de fora.
+// ================================================================
+
+const relatorio = {
+  periodo: 'este-mes',
+  inicio: null,
+  fim: null,
+  empresa: '',
+  dados: null,
+  aba: 'empresa',
+  busca: '',
+  montado: false,
+  carregando: false
+};
+
+const PERIODOS_RELATORIO = [
+  { id: 'hoje', texto: 'Hoje' },
+  { id: 'esta-semana', texto: 'Esta semana' },
+  { id: 'semana-passada', texto: 'Semana passada' },
+  { id: 'este-mes', texto: 'Este mês' },
+  { id: 'mes-passado', texto: 'Mês passado' },
+  { id: 'personalizado', texto: 'Escolher datas' }
+];
+
+const ABAS_RELATORIO = [
+  { id: 'empresa', texto: 'Por empresa' },
+  { id: 'dia', texto: 'Por dia' },
+  { id: 'funcionario', texto: 'Por funcionário' },
+  { id: 'proteina', texto: 'Por proteína' }
+];
+
+TELAS['relatorios'] = {
+  carregar: function() {
+    montarFiltrosRelatorio();
+    if (relatorio.dados) {
+      renderizarRelatorio();
+    } else {
+      gerarRelatorioAgora();
+    }
+  }
+};
+
+// Empresas excluídas (o histórico delas continua nos relatórios)
+let empresasExcluidas = [];
+let empresasExcluidasCarregadas = false;
+
+AO_SAIR.push(function() {
+  empresasExcluidas = [];
+  empresasExcluidasCarregadas = false;
+  relatorio.periodo = 'este-mes';
+  relatorio.inicio = null;
+  relatorio.fim = null;
+  relatorio.empresa = '';
+  relatorio.dados = null;
+  relatorio.aba = 'empresa';
+  relatorio.busca = '';
+  relatorio.montado = false;
+});
+
+// ---------- PERÍODOS ----------
+function ultimoDiaDoMes(texto) {
+  const data = textoParaData(texto.slice(0, 8) + '01');
+  data.setMonth(data.getMonth() + 1);
+  data.setDate(0);
+  return dataParaTexto(data);
+}
+
+function datasDoPeriodo(periodo) {
+  const hoje = hojeTexto();
+  const inicioMes = hoje.slice(0, 8) + '01';
+
+  switch (periodo) {
+    case 'hoje': return [hoje, hoje];
+    case 'esta-semana': return [segundaDe(hoje), somarDias(segundaDe(hoje), 6)];
+    case 'semana-passada': return [somarDias(segundaDe(hoje), -7), somarDias(segundaDe(hoje), -1)];
+    case 'mes-passado': {
+      const fim = somarDias(inicioMes, -1);
+      return [fim.slice(0, 8) + '01', fim];
+    }
+    default: return [inicioMes, ultimoDiaDoMes(hoje)];
+  }
+}
+
+function textoPeriodo(inicio, fim) {
+  return inicio === fim ? formatarData(inicio) : formatarData(inicio) + ' a ' + formatarData(fim);
+}
+
+// ---------- FILTROS ----------
+function montarFiltrosRelatorio() {
+  if (relatorio.montado) {
+    preencherEmpresasRelatorio();
+    return;
+  }
+
+  if (!relatorio.inicio) {
+    const datas = datasDoPeriodo(relatorio.periodo);
+    relatorio.inicio = datas[0];
+    relatorio.fim = datas[1];
+  }
+
+  const caixa = $('filtrosRelatorio');
+  caixa.innerHTML = '';
+
+  const linha = el('div', 'filtros-relatorio-linha');
+
+  function criarCampo(rotulo, campo, classe) {
+    const bloco = el('div', 'campo ' + (classe || ''));
+    bloco.appendChild(el('label', '', rotulo));
+    bloco.appendChild(campo);
+    return bloco;
+  }
+
+  const periodo = el('select');
+  periodo.id = 'relatorioPeriodo';
+  PERIODOS_RELATORIO.forEach(function(p) {
+    const opcao = el('option', '', p.texto);
+    opcao.value = p.id;
+    periodo.appendChild(opcao);
+  });
+  periodo.value = relatorio.periodo;
+  linha.appendChild(criarCampo('Período', periodo));
+
+  const inicio = el('input');
+  inicio.type = 'date';
+  inicio.id = 'relatorioInicio';
+  inicio.value = relatorio.inicio;
+  linha.appendChild(criarCampo('De', inicio, 'campo-data'));
+
+  const fim = el('input');
+  fim.type = 'date';
+  fim.id = 'relatorioFim';
+  fim.value = relatorio.fim;
+  linha.appendChild(criarCampo('Até', fim, 'campo-data'));
+
+  const empresa = el('select');
+  empresa.id = 'relatorioEmpresa';
+  linha.appendChild(criarCampo('Empresa', empresa, 'campo-empresa'));
+
+  const gerar = criarBotao('Gerar relatório', {
+    classe: 'botao-primario', icone: 'relatorio',
+    aoClicar: function() { gerarRelatorioAgora(); }
+  });
+  gerar.id = 'botaoGerarRelatorio';
+  linha.appendChild(gerar);
+
+  caixa.appendChild(linha);
+
+  periodo.addEventListener('change', function() {
+    relatorio.periodo = periodo.value;
+    if (periodo.value === 'personalizado') {
+      inicio.focus();
+      return;
+    }
+    const datas = datasDoPeriodo(periodo.value);
+    inicio.value = datas[0];
+    fim.value = datas[1];
+    gerarRelatorioAgora();
+  });
+
+  [inicio, fim].forEach(function(campo) {
+    campo.addEventListener('change', function() {
+      relatorio.periodo = 'personalizado';
+      periodo.value = 'personalizado';
+    });
+  });
+
+  empresa.addEventListener('change', function() { gerarRelatorioAgora(); });
+
+  relatorio.montado = true;
+  preencherEmpresasRelatorio();
+}
+
+function preencherEmpresasRelatorio() {
+  const seletor = document.getElementById('relatorioEmpresa');
+  if (!seletor) return;
+
+  function preencher() {
+    const atual = relatorio.empresa;
+    seletor.innerHTML = '';
+
+    [{ valor: '', texto: 'Todas as empresas' }, { valor: 'CLIENTES', texto: 'Clientes sem cadastro' }]
+      .concat(empresas.slice()
+        .sort(function(a, b) { return a.nome_empresa.localeCompare(b.nome_empresa, 'pt-BR'); })
+        .map(function(e) { return { valor: e.empresa_id, texto: e.nome_empresa }; }))
+      .concat(empresasExcluidas.map(function(e) {
+        return { valor: e.empresa_id, texto: e.nome_empresa + ' (excluída)' };
+      }))
+      .forEach(function(item) {
+        const opcao = el('option', '', item.texto);
+        opcao.value = item.valor;
+        seletor.appendChild(opcao);
+      });
+
+    seletor.value = atual;
+    if (seletor.value !== atual) seletor.value = '';
+  }
+
+  preencher();
+  if (!empresasCarregadas) buscarEmpresas().then(preencher).catch(function() { /* fica só "Todas" */ });
+  if (!empresasExcluidasCarregadas) {
+    empresasExcluidasCarregadas = true;
+    apiSessao('listarEmpresasExcluidas')
+      .then(function(lista) { empresasExcluidas = lista || []; preencher(); })
+      .catch(function() { empresasExcluidasCarregadas = false; });
+  }
+}
+
+// ---------- GERAR ----------
+function gerarRelatorioAgora() {
+  const inicio = $('relatorioInicio').value;
+  const fim = $('relatorioFim').value;
+
+  if (!inicio || !fim) {
+    avisar('Escolha as datas do período.', 'erro');
+    return;
+  }
+
+  if (fim < inicio) {
+    avisar('A data final precisa ser igual ou depois da data inicial.', 'erro');
+    return;
+  }
+
+  relatorio.inicio = inicio;
+  relatorio.fim = fim;
+  relatorio.empresa = $('relatorioEmpresa').value;
+
+  const pedido = { inicio: inicio, fim: fim, empresa: relatorio.empresa };
+  relatorio.ultimoPedido = pedido;
+
+  mostrarCarregandoLista($('relatorioConteudo'), 4);
+
+  comCarregamento($('botaoGerarRelatorio'), apiSessao('gerarRelatorio', pedido))
+    .then(function(dados) {
+      if (relatorio.ultimoPedido !== pedido) return;   // já pediram outro
+      relatorio.dados = dados;
+      if (estado.telaAtual === 'relatorios') renderizarRelatorio();
+    })
+    .catch(function(erro) {
+      if (relatorio.ultimoPedido !== pedido) return;
+      mostrarErroLista($('relatorioConteudo'), erro.message, gerarRelatorioAgora);
+    });
+}
+
+// ---------- TELA ----------
+function renderizarRelatorio() {
+  const d = relatorio.dados;
+  const conteudo = $('relatorioConteudo');
+  conteudo.innerHTML = '';
+
+  const topo = el('div', 'relatorio-topo');
+  const textos = el('div');
+  textos.appendChild(el('h2', '', d.nome_filtro));
+  textos.appendChild(el('p', 'subtitulo-cartao', textoPeriodo(d.inicio, d.fim)));
+  topo.appendChild(textos);
+
+  const exportar = el('div', 'relatorio-exportar');
+  const excel = criarBotao('Excel', {
+    classe: 'botao-secundario', icone: 'relatorio',
+    titulo: 'Baixar o relatório em planilha do Excel (.xlsx)',
+    aoClicar: function() { baixarRelatorioExcel(d); }
+  });
+  const pdf = criarBotao('PDF / Imprimir', {
+    classe: 'botao-secundario', icone: 'imprimir',
+    titulo: 'Imprimir ou salvar como PDF',
+    aoClicar: function() { imprimirRelatorio(d); }
+  });
+  excel.disabled = pdf.disabled = !d.totais.quentinhas;
+  exportar.appendChild(excel);
+  exportar.appendChild(pdf);
+  topo.appendChild(exportar);
+  conteudo.appendChild(topo);
+
+  if (!d.totais.quentinhas) {
+    conteudo.appendChild(estadoVazio({
+      icone: 'relatorio',
+      titulo: 'Nenhuma quentinha neste período',
+      texto: 'Escolha outro período ou outra empresa.'
+    }));
+    return;
+  }
+
+  if (d.totais.pendentes) {
+    conteudo.appendChild(criarAlerta(d.totais.pendentes + ' pedido(s) do período ainda aguardam confirmação e estão incluídos nos números.', { icone: 'alerta' }));
+  }
+
+  const indicadores = el('div', 'grade-indicadores quatro');
+  indicadores.appendChild(criarIndicador({
+    icone: 'pedido', rotulo: 'Quentinhas', valor: d.totais.quentinhas,
+    detalhe: d.totais.alteradas ? d.totais.alteradas + ' com alteração' : 'nenhuma com alteração'
+  }));
+  indicadores.appendChild(criarIndicador({
+    icone: 'preco', cor: 'azul', rotulo: 'Valor total', valor: formatarMoeda(d.totais.valor),
+    detalhe: 'preço médio ' + formatarMoeda(d.totais.valor / d.totais.quentinhas)
+  }));
+  indicadores.appendChild(criarIndicador({
+    icone: 'empresa', rotulo: 'Pedidos', valor: d.totais.pedidos,
+    detalhe: 'em ' + d.totais.dias + (d.totais.dias === 1 ? ' dia' : ' dias')
+  }));
+  indicadores.appendChild(criarIndicador({
+    icone: 'calendario', cor: 'azul', rotulo: 'Média por dia',
+    valor: (Math.round(d.totais.quentinhas / d.totais.dias * 10) / 10).toLocaleString('pt-BR'),
+    detalhe: 'quentinhas nos dias com pedido'
+  }));
+  conteudo.appendChild(indicadores);
+
+  const abas = el('div', 'abas-relatorio');
+  abas.setAttribute('role', 'tablist');
+  ABAS_RELATORIO.forEach(function(aba) {
+    const botao = el('button', 'aba-relatorio' + (aba.id === relatorio.aba ? ' ativa' : ''), aba.texto);
+    botao.type = 'button';
+    botao.setAttribute('role', 'tab');
+    botao.setAttribute('aria-selected', aba.id === relatorio.aba ? 'true' : 'false');
+    botao.addEventListener('click', function() {
+      relatorio.aba = aba.id;
+      renderizarRelatorio();
+    });
+    abas.appendChild(botao);
+  });
+  conteudo.appendChild(abas);
+
+  const area = el('div', 'relatorio-area');
+  area.id = 'relatorioArea';
+  conteudo.appendChild(area);
+  renderizarAbaRelatorio();
+}
+
+function linhaTotal(rotulo, partes) {
+  const linha = el('div', 'total-relatorio');
+  linha.appendChild(el('strong', '', rotulo));
+  linha.appendChild(el('span', '', partes.join(' · ')));
+  return linha;
+}
+
+function criarBarra(valor, maximo) {
+  const caixa = el('div', 'barra-relatorio');
+  const preenchido = el('span');
+  preenchido.style.width = (maximo ? Math.max(3, Math.round(valor / maximo * 100)) : 0) + '%';
+  caixa.appendChild(preenchido);
+  return caixa;
+}
+
+function renderizarAbaRelatorio() {
+  const d = relatorio.dados;
+  const area = $('relatorioArea');
+  area.innerHTML = '';
+  const quentinhas = function(n) { return n + (n === 1 ? ' quentinha' : ' quentinhas'); };
+
+  if (relatorio.aba === 'empresa') {
+    const lista = el('div');
+    renderizarLista(lista, {
+      itens: d.por_empresa,
+      colunas: [
+        { titulo: 'Empresa', valor: function(e) {
+          return textoDuplo(e.nome, e.cliente_avulso ? 'Cliente sem cadastro' : '');
+        } },
+        { titulo: 'Quentinhas', largura: '110px', valor: function(e) { return e.quentinhas; } },
+        { titulo: 'Pedidos', largura: '90px', valor: function(e) { return e.pedidos; } },
+        { titulo: 'Dias', largura: '70px', valor: function(e) { return e.dias; } },
+        { titulo: 'Preço médio', largura: '120px', valor: function(e) { return formatarMoeda(e.preco_medio); } },
+        { titulo: 'Valor', largura: '130px', valor: function(e) { return el('strong', '', formatarMoeda(e.valor)); } }
+      ]
+    });
+    area.appendChild(lista);
+    area.appendChild(linhaTotal('Total', [quentinhas(d.totais.quentinhas), formatarMoeda(d.totais.valor)]));
+  }
+
+  if (relatorio.aba === 'dia') {
+    const maximo = Math.max.apply(null, d.por_dia.map(function(x) { return x.quentinhas; }));
+    const lista = el('div');
+    renderizarLista(lista, {
+      itens: d.por_dia,
+      colunas: [
+        { titulo: 'Dia', valor: function(x) { return textoDuplo(formatarData(x.data), x.dia_semana); } },
+        { titulo: 'Pedidos', largura: '90px', valor: function(x) { return x.pedidos; } },
+        { titulo: 'Quentinhas', largura: '110px', valor: function(x) { return x.quentinhas; } },
+        { titulo: '', largura: 'minmax(80px, 1fr)', valor: function(x) { return criarBarra(x.quentinhas, maximo); } },
+        { titulo: 'Valor', largura: '130px', valor: function(x) { return el('strong', '', formatarMoeda(x.valor)); } }
+      ]
+    });
+    area.appendChild(lista);
+    area.appendChild(linhaTotal('Total', [quentinhas(d.totais.quentinhas), formatarMoeda(d.totais.valor)]));
+  }
+
+  if (relatorio.aba === 'funcionario') {
+    const ferramentas = el('div', 'ferramentas');
+    const busca = el('div', 'campo-busca');
+    busca.innerHTML = icone('busca');
+    const campo = el('input');
+    campo.type = 'search';
+    campo.placeholder = 'Buscar por nome, setor ou empresa';
+    campo.value = relatorio.busca;
+    busca.appendChild(campo);
+    ferramentas.appendChild(busca);
+    area.appendChild(ferramentas);
+
+    const lista = el('div');
+    area.appendChild(lista);
+    const totais = el('div');
+    area.appendChild(totais);
+
+    const variasEmpresas = d.por_empresa.length > 1;
+
+    const desenhar = function() {
+      const termo = normalizarBusca(relatorio.busca);
+      const itens = d.por_funcionario.filter(function(p) {
+        return !termo || normalizarBusca(p.nome + ' ' + p.setor + ' ' + p.matricula + ' ' + p.empresa).indexOf(termo) !== -1;
+      });
+
+      const colunas = [
+        { titulo: 'Nome', valor: function(p) {
+          return textoDuplo(p.nome, [p.setor, p.matricula ? 'Matr. ' + p.matricula : '', p.avulsa ? 'Avulsa' : '']
+            .filter(Boolean).join(' · '));
+        } }
+      ];
+      if (variasEmpresas) colunas.push({ titulo: 'Empresa', valor: function(p) { return p.empresa; } });
+      colunas.push(
+        { titulo: 'Dias', largura: '70px', valor: function(p) { return p.dias; } },
+        { titulo: 'Quentinhas', largura: '110px', valor: function(p) { return p.quentinhas; } },
+        { titulo: 'Com alteração', largura: '130px', valor: function(p) { return p.alteradas || '—'; } },
+        { titulo: 'Valor', largura: '130px', valor: function(p) { return el('strong', '', formatarMoeda(p.valor)); } }
+      );
+
+      renderizarLista(lista, {
+        itens: itens,
+        colunas: colunas,
+        vazio: { icone: 'busca', titulo: 'Ninguém encontrado', texto: 'Tente buscar de outro jeito.' }
+      });
+
+      const soma = itens.reduce(function(s, p) { return { q: s.q + p.quentinhas, v: s.v + p.valor }; }, { q: 0, v: 0 });
+      totais.innerHTML = '';
+      totais.appendChild(linhaTotal(
+        termo ? itens.length + ' pessoa(s) encontrada(s)' : itens.length + ' pessoa(s)',
+        [quentinhas(soma.q), formatarMoeda(soma.v)]
+      ));
+    };
+
+    campo.addEventListener('input', function() {
+      relatorio.busca = campo.value;
+      desenhar();
+    });
+    desenhar();
+  }
+
+  if (relatorio.aba === 'proteina') {
+    const maximo = d.por_proteina.length ? d.por_proteina[0].quentinhas : 0;
+    const lista = el('div');
+    renderizarLista(lista, {
+      itens: d.por_proteina,
+      colunas: [
+        { titulo: 'Proteína', valor: function(p) { return p.nome; } },
+        { titulo: 'Quentinhas', largura: '110px', valor: function(p) { return p.quentinhas; } },
+        { titulo: '%', largura: '80px', valor: function(p) {
+          return (Math.round(p.quentinhas / d.totais.quentinhas * 1000) / 10).toLocaleString('pt-BR') + '%';
+        } },
+        { titulo: '', largura: 'minmax(80px, 2fr)', valor: function(p) { return criarBarra(p.quentinhas, maximo); } }
+      ]
+    });
+    area.appendChild(lista);
+  }
+}
+
+// ================================================================
+// PDF (pela janela de impressão do navegador)
+// ================================================================
+function imprimirRelatorio(d) {
+  const area = $('areaImpressao');
+  area.innerHTML = '';
+
+  const cabecalho = el('div', 'imp-cabecalho');
+  cabecalho.appendChild(el('strong', '', 'Tempero de Mãe · Relatório de consumo · ' + d.nome_filtro));
+  cabecalho.appendChild(el('span', '', textoPeriodo(d.inicio, d.fim) + ' · gerado em ' +
+    new Date(d.gerado_em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })));
+  area.appendChild(cabecalho);
+
+  function tabela(titulos, linhas, total, classesNumero) {
+    const t = el('table', 'imp-tabela imp-tabela-relatorio');
+    const cabeca = el('tr');
+    titulos.forEach(function(titulo, i) { cabeca.appendChild(el('th', classesNumero.indexOf(i) !== -1 ? 'num' : '', titulo)); });
+    t.appendChild(el('thead')).appendChild(cabeca);
+    const corpo = el('tbody');
+    linhas.concat(total ? [total] : []).forEach(function(valores, indice) {
+      const linha = el('tr', total && indice === linhas.length ? 'imp-total' : '');
+      valores.forEach(function(valor, i) { linha.appendChild(el('td', classesNumero.indexOf(i) !== -1 ? 'num' : '', valor)); });
+      corpo.appendChild(linha);
+    });
+    t.appendChild(corpo);
+    return t;
+  }
+
+  const resumo = el('section', 'imp-resumo');
+  resumo.appendChild(el('h2', '', 'Resumo'));
+  resumo.appendChild(el('p', 'imp-contagem',
+    d.totais.quentinhas + ' quentinhas   ·   ' + formatarMoeda(d.totais.valor) + '   ·   ' +
+    d.totais.pedidos + ' pedidos em ' + d.totais.dias + ' dia(s)' +
+    (d.totais.pendentes ? '   ·   ' + d.totais.pendentes + ' aguardando confirmação' : '')));
+
+  resumo.appendChild(el('h3', 'imp-subtitulo', 'Por empresa'));
+  resumo.appendChild(tabela(
+    ['Empresa', 'Pedidos', 'Dias', 'Quentinhas', 'Preço médio', 'Valor'],
+    d.por_empresa.map(function(e) {
+      return [e.nome + (e.cliente_avulso ? ' (sem cadastro)' : ''), e.pedidos, e.dias, e.quentinhas, formatarMoeda(e.preco_medio), formatarMoeda(e.valor)];
+    }),
+    ['Total', d.totais.pedidos, d.totais.dias, d.totais.quentinhas, '', formatarMoeda(d.totais.valor)],
+    [1, 2, 3, 4, 5]
+  ));
+
+  resumo.appendChild(el('h3', 'imp-subtitulo', 'Por dia'));
+  resumo.appendChild(tabela(
+    ['Dia', '', 'Pedidos', 'Quentinhas', 'Valor'],
+    d.por_dia.map(function(x) { return [formatarData(x.data), x.dia_semana, x.pedidos, x.quentinhas, formatarMoeda(x.valor)]; }),
+    ['Total', '', d.totais.pedidos, d.totais.quentinhas, formatarMoeda(d.totais.valor)],
+    [2, 3, 4]
+  ));
+
+  resumo.appendChild(el('h3', 'imp-subtitulo', 'Por proteína'));
+  resumo.appendChild(tabela(
+    ['Proteína', 'Quentinhas', '%'],
+    d.por_proteina.map(function(p) {
+      return [p.nome, p.quentinhas, (Math.round(p.quentinhas / d.totais.quentinhas * 1000) / 10).toLocaleString('pt-BR') + '%'];
+    }),
+    null,
+    [1, 2]
+  ));
+  area.appendChild(resumo);
+
+  // Consumo por pessoa: uma folha por empresa (fácil de enviar a cada uma)
+  const grupos = {};
+  d.por_funcionario.forEach(function(p) {
+    (grupos[p.empresa] = grupos[p.empresa] || []).push(p);
+  });
+
+  d.por_empresa.forEach(function(empresa) {
+    const pessoas = grupos[empresa.nome] || [];
+    if (!pessoas.length) return;
+
+    const secao = el('section', 'imp-pedido imp-nova-folha');
+    const topo = el('div', 'imp-pedido-topo');
+    const textos = el('div');
+    textos.appendChild(el('h2', '', empresa.nome));
+    textos.appendChild(el('p', 'imp-detalhe', 'Consumo por pessoa · ' + textoPeriodo(d.inicio, d.fim)));
+    topo.appendChild(textos);
+    const caixa = el('div', 'imp-quantidade');
+    caixa.appendChild(el('strong', '', String(empresa.quentinhas)));
+    caixa.appendChild(el('span', '', formatarMoeda(empresa.valor)));
+    topo.appendChild(caixa);
+    secao.appendChild(topo);
+
+    secao.appendChild(tabela(
+      ['Nome', 'Setor', 'Matrícula', 'Dias', 'Quentinhas', 'Valor'],
+      pessoas.map(function(p) {
+        return [p.nome + (p.avulsa ? ' (avulsa)' : ''), p.setor || '–', p.matricula || '–', p.dias, p.quentinhas, formatarMoeda(p.valor)];
+      }),
+      ['Total', '', '', empresa.dias, empresa.quentinhas, formatarMoeda(empresa.valor)],
+      [3, 4, 5]
+    ));
+    area.appendChild(secao);
+  });
+
+  setTimeout(function() { window.print(); }, 60);
+}
+
+// ================================================================
+// EXCEL (.xlsx montado no navegador)
+// ================================================================
+function baixarRelatorioExcel(d) {
+  const periodo = textoPeriodo(d.inicio, d.fim);
+  const moeda = function(v) { return { n: v, estilo: 2 }; };
+  const data = function(t) { return { data: t }; };
+  const negrito = function(v) { return { s: v, estilo: 4 }; };
+  const negritoMoeda = function(v) { return { n: v, estilo: 5 }; };
+
+  const abas = [
+    {
+      nome: 'Resumo',
+      larguras: [26, 40],
+      linhas: [
+        [negrito('Tempero de Mãe · Relatório de consumo')],
+        ['Período', periodo],
+        ['Empresa', d.nome_filtro],
+        ['Gerado em', new Date(d.gerado_em).toLocaleString('pt-BR')],
+        [],
+        ['Quentinhas', d.totais.quentinhas],
+        ['Valor total', moeda(d.totais.valor)],
+        ['Pedidos', d.totais.pedidos],
+        ['Dias com pedido', d.totais.dias],
+        ['Quentinhas com alteração', d.totais.alteradas],
+        ['Pedidos aguardando confirmação', d.totais.pendentes]
+      ]
+    },
+    {
+      nome: 'Por empresa',
+      cabecalho: true,
+      larguras: [34, 20, 12, 10, 8, 14, 16],
+      linhas: [['Empresa', 'Tipo', 'Quentinhas', 'Pedidos', 'Dias', 'Preço médio', 'Valor']]
+        .concat(d.por_empresa.map(function(e) {
+          return [e.nome, e.cliente_avulso ? 'Sem cadastro' : 'Empresa', e.quentinhas, e.pedidos, e.dias, moeda(e.preco_medio), moeda(e.valor)];
+        }))
+        .concat([[negrito('Total'), '', d.totais.quentinhas, d.totais.pedidos, d.totais.dias, '', negritoMoeda(d.totais.valor)]])
+    },
+    {
+      nome: 'Por dia',
+      cabecalho: true,
+      larguras: [12, 16, 10, 12, 16],
+      linhas: [['Data', 'Dia', 'Pedidos', 'Quentinhas', 'Valor']]
+        .concat(d.por_dia.map(function(x) { return [data(x.data), x.dia_semana, x.pedidos, x.quentinhas, moeda(x.valor)]; }))
+        .concat([[negrito('Total'), '', d.totais.pedidos, d.totais.quentinhas, negritoMoeda(d.totais.valor)]])
+    },
+    {
+      nome: 'Por funcionário',
+      cabecalho: true,
+      larguras: [30, 32, 18, 12, 8, 12, 15, 16],
+      linhas: [['Empresa', 'Nome', 'Setor', 'Matrícula', 'Dias', 'Quentinhas', 'Com alteração', 'Valor']]
+        .concat(d.por_funcionario.map(function(p) {
+          return [p.empresa, p.nome + (p.avulsa ? ' (avulsa)' : ''), p.setor, p.matricula, p.dias, p.quentinhas, p.alteradas, moeda(p.valor)];
+        }))
+        .concat([[negrito('Total'), '', '', '', '', d.totais.quentinhas, d.totais.alteradas, negritoMoeda(d.totais.valor)]])
+    },
+    {
+      nome: 'Por proteína',
+      cabecalho: true,
+      larguras: [30, 12, 10],
+      linhas: [['Proteína', 'Quentinhas', '%']]
+        .concat(d.por_proteina.map(function(p) {
+          return [p.nome, p.quentinhas, Math.round(p.quentinhas / d.totais.quentinhas * 1000) / 10];
+        }))
+    },
+    {
+      nome: 'Detalhado',
+      cabecalho: true,
+      larguras: [12, 30, 32, 18, 12, 22, 16, 34, 22, 12],
+      linhas: [['Data', 'Empresa', 'Nome', 'Setor', 'Matrícula', 'Proteína', 'Extra', 'Alteração', 'Situação', 'Valor']]
+        .concat(d.itens.map(function(i) {
+          return [data(i.data), i.empresa, i.nome, i.setor, i.matricula, i.proteina, i.opcao_extra, i.alteracao, i.situacao, moeda(i.valor)];
+        }))
+    }
+  ];
+
+  const nomeArquivo = 'tempero-de-mae_relatorio_' + d.inicio + '_a_' + d.fim + '.xlsx';
+
+  try {
+    const arquivo = montarXlsx(abas);
+    const endereco = URL.createObjectURL(new Blob([arquivo], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    }));
+    const link = el('a');
+    link.href = endereco;
+    link.download = nomeArquivo;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function() { URL.revokeObjectURL(endereco); }, 60000);
+    avisar('Planilha "' + nomeArquivo + '" baixada.');
+  } catch (erro) {
+    console.error(erro);
+    avisar('Não foi possível gerar a planilha: ' + erro.message, 'erro');
+  }
+}
+
+// ---------- Montagem do arquivo .xlsx ----------
+// (montado em partes para a sequência "<" + "?" nunca aparecer no código da página)
+const CABECALHO_XML = '<' + '?xml version="1.0" encoding="UTF-8" standalone="yes"?' + '>';
+// Estilos: 0 normal · 1 cabeçalho · 2 moeda · 3 data · 4 negrito · 5 negrito moeda
+function escaparXml(texto) {
+  return String(texto)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+}
+
+function letraColuna(indice) {
+  let letra = '';
+  indice++;
+  while (indice > 0) {
+    const resto = (indice - 1) % 26;
+    letra = String.fromCharCode(65 + resto) + letra;
+    indice = Math.floor((indice - 1) / 26);
+  }
+  return letra;
+}
+
+function dataParaSerialExcel(texto) {
+  const p = texto.split('-').map(Number);
+  return Date.UTC(p[0], p[1] - 1, p[2]) / 86400000 + 25569;
+}
+
+function celulaXml(valor, referencia, estiloLinha) {
+  if (valor === null || valor === undefined || valor === '') return '';
+
+  let estilo = estiloLinha || 0;
+  let numero = null;
+  let texto = null;
+
+  if (typeof valor === 'number') {
+    numero = valor;
+  } else if (typeof valor === 'object') {
+    if (valor.data) { numero = dataParaSerialExcel(valor.data); estilo = 3; }
+    else if (valor.n !== undefined) { numero = valor.n; estilo = valor.estilo || estilo; }
+    else { texto = valor.s; estilo = valor.estilo || estilo; }
+  } else {
+    texto = valor;
+  }
+
+  const s = estilo ? ' s="' + estilo + '"' : '';
+
+  if (numero !== null) {
+    return '<c r="' + referencia + '"' + s + '><v>' + (isFinite(numero) ? numero : 0) + '</v></c>';
+  }
+
+  return '<c r="' + referencia + '"' + s + ' t="inlineStr"><is><t xml:space="preserve">' + escaparXml(texto) + '</t></is></c>';
+}
+
+function planilhaXml(aba) {
+  const partes = [CABECALHO_XML,
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'];
+
+  partes.push(aba.cabecalho
+    ? '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>'
+    : '<sheetViews><sheetView workbookViewId="0"/></sheetViews>');
+
+  if (aba.larguras) {
+    partes.push('<cols>' + aba.larguras.map(function(largura, i) {
+      return '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + largura + '" customWidth="1"/>';
+    }).join('') + '</cols>');
+  }
+
+  partes.push('<sheetData>');
+  aba.linhas.forEach(function(linha, i) {
+    const estiloLinha = aba.cabecalho && i === 0 ? 1 : 0;
+    const celulas = linha.map(function(valor, j) { return celulaXml(valor, letraColuna(j) + (i + 1), estiloLinha); }).join('');
+    partes.push('<row r="' + (i + 1) + '">' + celulas + '</row>');
+  });
+  partes.push('</sheetData>');
+
+  if (aba.cabecalho && aba.linhas.length > 1) {
+    partes.push('<autoFilter ref="A1:' + letraColuna(aba.linhas[0].length - 1) + aba.linhas.length + '"/>');
+  }
+
+  partes.push('</worksheet>');
+  return partes.join('');
+}
+
+function montarXlsx(abas) {
+  const arquivos = [];
+  const adicionar = function(nome, texto) { arquivos.push({ nome: nome, dados: new TextEncoder().encode(texto) }); };
+  const cabecalhoXml = CABECALHO_XML;
+
+  adicionar('[Content_Types].xml', cabecalhoXml +
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+    '<Default Extension="xml" ContentType="application/xml"/>' +
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+    '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
+    abas.map(function(aba, i) {
+      return '<Override PartName="/xl/worksheets/sheet' + (i + 1) + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
+    }).join('') +
+    '</Types>');
+
+  adicionar('_rels/.rels', cabecalhoXml +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
+    '</Relationships>');
+
+  adicionar('xl/workbook.xml', cabecalhoXml +
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>' +
+    abas.map(function(aba, i) {
+      return '<sheet name="' + escaparXml(aba.nome) + '" sheetId="' + (i + 1) + '" r:id="rId' + (i + 1) + '"/>';
+    }).join('') +
+    '</sheets></workbook>');
+
+  adicionar('xl/_rels/workbook.xml.rels', cabecalhoXml +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    abas.map(function(aba, i) {
+      return '<Relationship Id="rId' + (i + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + (i + 1) + '.xml"/>';
+    }).join('') +
+    '<Relationship Id="rId' + (abas.length + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
+    '</Relationships>');
+
+  adicionar('xl/styles.xml', cabecalhoXml +
+    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<numFmts count="2"><numFmt numFmtId="164" formatCode="&quot;R$&quot; #,##0.00"/><numFmt numFmtId="165" formatCode="dd/mm/yyyy"/></numFmts>' +
+    '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>' +
+    '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>' +
+    '<fill><patternFill patternType="solid"><fgColor rgb="FFE3F1E8"/><bgColor indexed="64"/></patternFill></fill></fills>' +
+    '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+    '<cellXfs count="6">' +
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+    '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>' +
+    '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +
+    '<xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +
+    '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+    '<xf numFmtId="164" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/>' +
+    '</cellXfs>' +
+    '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
+    '</styleSheet>');
+
+  abas.forEach(function(aba, i) { adicionar('xl/worksheets/sheet' + (i + 1) + '.xml', planilhaXml(aba)); });
+
+  return montarZip(arquivos);
+}
+
+// ZIP sem compressão (o formato .xlsx é um ZIP com arquivos XML dentro)
+const TABELA_CRC = (function() {
+  const tabela = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    tabela[n] = c >>> 0;
+  }
+  return tabela;
+})();
+
+function crc32(bytes) {
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) crc = TABELA_CRC[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+function montarZip(arquivos) {
+  const partes = [];
+  const central = [];
+  let deslocamento = 0;
+
+  arquivos.forEach(function(arquivo) {
+    const nome = new TextEncoder().encode(arquivo.nome);
+    const crc = crc32(arquivo.dados);
+    const tamanho = arquivo.dados.length;
+
+    const local = new DataView(new ArrayBuffer(30));
+    local.setUint32(0, 0x04034b50, true);
+    local.setUint16(4, 20, true);
+    local.setUint16(6, 0x0800, true);   // nomes em UTF-8
+    local.setUint16(8, 0, true);        // sem compressão
+    local.setUint16(10, 0, true);
+    local.setUint16(12, 0x21, true);
+    local.setUint32(14, crc, true);
+    local.setUint32(18, tamanho, true);
+    local.setUint32(22, tamanho, true);
+    local.setUint16(26, nome.length, true);
+    local.setUint16(28, 0, true);
+    partes.push(new Uint8Array(local.buffer), nome, arquivo.dados);
+
+    const entrada = new DataView(new ArrayBuffer(46));
+    entrada.setUint32(0, 0x02014b50, true);
+    entrada.setUint16(4, 20, true);
+    entrada.setUint16(6, 20, true);
+    entrada.setUint16(8, 0x0800, true);
+    entrada.setUint16(10, 0, true);
+    entrada.setUint16(12, 0, true);
+    entrada.setUint16(14, 0x21, true);
+    entrada.setUint32(16, crc, true);
+    entrada.setUint32(20, tamanho, true);
+    entrada.setUint32(24, tamanho, true);
+    entrada.setUint16(28, nome.length, true);
+    entrada.setUint32(42, deslocamento, true);
+    central.push(new Uint8Array(entrada.buffer), nome);
+
+    deslocamento += 30 + nome.length + tamanho;
+  });
+
+  const tamanhoCentral = central.reduce(function(s, p) { return s + p.length; }, 0);
+  const fim = new DataView(new ArrayBuffer(22));
+  fim.setUint32(0, 0x06054b50, true);
+  fim.setUint16(8, arquivos.length, true);
+  fim.setUint16(10, arquivos.length, true);
+  fim.setUint32(12, tamanhoCentral, true);
+  fim.setUint32(16, deslocamento, true);
+
+  const todas = partes.concat(central, [new Uint8Array(fim.buffer)]);
+  const total = todas.reduce(function(s, p) { return s + p.length; }, 0);
+  const resultado = new Uint8Array(total);
+  let posicao = 0;
+  todas.forEach(function(p) { resultado.set(p, posicao); posicao += p.length; });
+  return resultado;
+}
+</script>

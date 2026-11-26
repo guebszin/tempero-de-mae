@@ -1,0 +1,167 @@
+<script>
+// ================================================================
+// SCRIPTEMPRESA.html — telas do portal da empresa
+// Início e consulta de Funcionários (o cadastro é feito pelo restaurante).
+// ================================================================
+
+// ----------------------------------------------------------------
+// DADOS EM MEMÓRIA
+// ----------------------------------------------------------------
+let funcionariosEmpresa = [];
+let funcionariosCarregados = false;
+let funcionariosEm = 0;
+
+let resumoEmpresa = null;
+let resumoEmpresaEm = 0;
+
+// Ao sair: nada da empresa fica na memória do aparelho
+AO_SAIR.push(function() {
+  funcionariosEmpresa = [];
+  funcionariosCarregados = false;
+  funcionariosEm = 0;
+  resumoEmpresa = null;
+  resumoEmpresaEm = 0;
+});
+
+// Dados que chegam junto com o login: as telas abrem sem esperar
+AO_ENTRAR.push(function(dados, usuario) {
+  if (usuario.perfil !== 'empresa') return;
+
+  if (dados.funcionarios) {
+    funcionariosEmpresa = dados.funcionarios;
+    funcionariosCarregados = true;
+    funcionariosEm = Date.now();
+  }
+
+  if (dados.resumo) {
+    resumoEmpresa = dados.resumo;
+    resumoEmpresaEm = Date.now();
+  }
+});
+
+// ----------------------------------------------------------------
+// INÍCIO
+// ----------------------------------------------------------------
+TELAS['inicio-empresa'] = { carregar: carregarInicioEmpresa };
+
+function carregarInicioEmpresa() {
+  $('saudacaoEmpresa').textContent = saudacaoDoHorario() + ', ' + primeiroNome(estado.usuario.nome) + '!';
+  $('dataHojeEmpresa').textContent = hojePorExtenso() + ' · ' + (estado.usuario.nome_empresa || '');
+
+  const tinhaDados = !!resumoEmpresa;
+
+  if (tinhaDados) {
+    renderizarResumoEmpresa(resumoEmpresa);
+  } else {
+    mostrarCarregandoLista($('indicadoresEmpresa'), 3);
+  }
+
+  if (tinhaDados && recente(resumoEmpresaEm)) return;
+
+  apiSessao('obterResumoEmpresa')
+    .then(function(r) {
+      resumoEmpresa = r;
+      resumoEmpresaEm = Date.now();
+      if (estado.telaAtual === 'inicio-empresa') renderizarResumoEmpresa(r);
+    })
+    .catch(function(erro) {
+      falhaAoAtualizar($('indicadoresEmpresa'), erro, carregarInicioEmpresa, tinhaDados);
+    });
+}
+
+function renderizarResumoEmpresa(r) {
+  renderizarCardapioDestaque(r.cardapio_destaque);
+  renderizarPedidoHojeEmpresa(r.pedido_hoje);
+
+  const indicadores = $('indicadoresEmpresa');
+  indicadores.innerHTML = '';
+
+  indicadores.appendChild(criarIndicador({
+    icone: 'pessoas',
+    rotulo: 'Funcionários ativos',
+    valor: r.funcionarios_ativos,
+    detalhe: r.funcionarios_ativos ? 'cadastrados no sistema' : 'cadastre sua equipe'
+  }));
+
+  if (r.escolha !== 'NINGUEM') {
+    indicadores.appendChild(criarIndicador({
+      icone: 'editar',
+      cor: 'azul',
+      rotulo: r.escolha === 'TODOS' ? 'Podem personalizar' : 'Escolhem a quentinha',
+      valor: r.autorizados_alterar,
+      detalhe: r.escolha === 'TODOS' ? 'tirar itens ou deixar observação' : 'os demais recebem a quentinha do dia'
+    }));
+  }
+
+  if (r.mostrar_precos === false) return;
+
+  indicadores.appendChild(criarIndicador({
+    icone: 'preco',
+    cor: r.preco_vigente ? '' : 'amarelo',
+    rotulo: 'Valor da quentinha',
+    valor: r.preco_vigente ? formatarMoeda(r.preco_vigente.valor_unitario) : 'A definir',
+    detalhe: r.preco_vigente
+      ? 'desde ' + formatarData(r.preco_vigente.data_inicio)
+      : 'aguardando o restaurante'
+  }));
+}
+
+$('atalhoVerFuncionarios').addEventListener('click', function() {
+  irPara('funcionarios-empresa');
+});
+
+// ----------------------------------------------------------------
+// FUNCIONÁRIOS
+// ----------------------------------------------------------------
+TELAS['funcionarios-empresa'] = { carregar: carregarFuncionariosEmpresa };
+
+function carregarFuncionariosEmpresa() {
+  const tinhaDados = funcionariosCarregados;
+
+  // Mostra na hora o que já está na memória e atualiza por trás
+  if (tinhaDados) {
+    renderizarFuncionariosEmpresa();
+  } else {
+    mostrarCarregandoLista($('listaFuncionarios'));
+  }
+
+  if (tinhaDados && recente(funcionariosEm)) return;
+
+  apiSessao('listarFuncionarios')
+    .then(function(lista) {
+      funcionariosEmpresa = lista;
+      funcionariosCarregados = true;
+      funcionariosEm = Date.now();
+      if (estado.telaAtual === 'funcionarios-empresa') renderizarFuncionariosEmpresa();
+    })
+    .catch(function(erro) {
+      falhaAoAtualizar($('listaFuncionarios'), erro, carregarFuncionariosEmpresa, tinhaDados);
+    });
+}
+
+function renderizarFuncionariosEmpresa() {
+  const status = $('filtroStatusFuncionarios').value;
+  const filtrados = filtrarFuncionarios(funcionariosEmpresa, $('buscaFuncionarios').value, status);
+  const ativos = funcionariosEmpresa.filter(function(f) { return f.status === 'ATIVO'; }).length;
+
+  $('contadorFuncionarios').textContent = funcionariosEmpresa.length
+    ? ativos + ' ativo(s) de ' + funcionariosEmpresa.length + ' cadastrado(s).'
+    : '';
+
+  renderizarLista($('listaFuncionarios'), {
+    itens: filtrados,
+    apagada: function(f) { return f.status !== 'ATIVO'; },
+    vazio: funcionariosEmpresa.length
+      ? { icone: 'busca', titulo: 'Nenhum funcionário encontrado', texto: 'Tente outra busca ou mude o filtro de situação.' }
+      : {
+          icone: 'pessoas',
+          titulo: 'Nenhum funcionário cadastrado',
+          texto: 'O restaurante ainda não cadastrou os funcionários da sua empresa. Entre em contato com ele.'
+        },
+    colunas: colunasFuncionarios()
+  });
+}
+
+$('buscaFuncionarios').addEventListener('input', renderizarFuncionariosEmpresa);
+$('filtroStatusFuncionarios').addEventListener('change', renderizarFuncionariosEmpresa);
+</script>

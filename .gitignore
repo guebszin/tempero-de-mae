@@ -1,0 +1,15 @@
+# Dependências
+node_modules/
+
+# Credenciais do clasp (NUNCA enviar para o GitHub)
+.clasprc.json
+
+# Arquivos gerados pelos testes
+testes/index.html
+testes/servidor.html
+testes/**/*.png
+testes/__pycache__/
+
+# Sistema
+.DS_Store
+Thumbs.db

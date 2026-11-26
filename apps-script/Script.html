@@ -1,0 +1,1716 @@
+<script>
+// ================================================================
+// SCRIPT.html — base do aplicativo
+// Login, sessão, navegação, janelas, avisos, máscaras e listas.
+// Os módulos (ScriptAdmin, ScriptEmpresa) registram suas telas em TELAS.
+// ================================================================
+
+const estado = {
+  token: null,
+  usuario: null,
+  telaAtual: null
+};
+
+// Tamanho mínimo de senha (o servidor confere de novo)
+const TAMANHO_MINIMO_SENHA = 6;
+
+// Telas registradas pelos módulos: { id: { titulo, carregar() } }
+const TELAS = {};
+
+// Funções dos módulos que recebem os dados que chegam junto com o login
+const AO_ENTRAR = [];
+
+// Funções dos módulos que apagam da memória os dados de quem saiu
+const AO_SAIR = [];
+
+// ----------------------------------------------------------------
+// ÍCONES (desenhados em SVG, sem bibliotecas externas)
+// ----------------------------------------------------------------
+const ICONES = {
+  marca: '<path d="M3 11h18l-1.6 8.2a2 2 0 0 1-2 1.8H6.6a2 2 0 0 1-2-1.8z"/><path d="M7 11a5 5 0 0 1 10 0"/><path d="M12 3v3"/>',
+  inicio: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/>',
+  empresa: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 7h1M14 7h1M9 11h1M14 11h1M9 15h1M14 15h1"/><path d="M10 21v-3h4v3"/>',
+  preco: '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
+  pessoas: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M18 14.2c2.1.6 3.5 2.6 3.5 5.8"/>',
+  cardapio: '<path d="M7 3v8M4 3v5a3 3 0 0 0 6 0V3M7 11v10"/><path d="M17 3c-2 0-3 2.5-3 6s1 4 3 4v8"/>',
+  pedido: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1"/><path d="M9 10h6M9 14h6M9 18h3"/>',
+  cobranca: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
+  relatorio: '<path d="M4 20V10M10 20V4M16 20v-7M2 20h20"/>',
+  teste: '<path d="M9 3h6"/><path d="M10 3v6.5L4.6 18.4A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.4-2.6L14 9.5V3"/><path d="M7.5 15h9"/>',
+  pizza: '<path d="M21 12A9 9 0 1 1 12 3v9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/>',
+  desconto: '<path d="M19 5 5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>',
+  mais: '<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>',
+  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  sair: '<path d="M9 4H5v16h4"/><path d="M16 8l4 4-4 4"/><path d="M20 12H9"/>',
+  chave: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3"/>',
+  sol: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  lua: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
+  automatico: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+  adicionar: '<path d="M12 5v14M5 12h14"/>',
+  fechar: '<path d="M6 6l12 12M18 6 6 18"/>',
+  olho: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  alerta: '<path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/>',
+  check: '<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/>',
+  erro: '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>',
+  busca: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
+  editar: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/>',
+  copiar: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/>',
+  calendario: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+  vazio: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 15h6"/>',
+  anterior: '<path d="M15 6l-6 6 6 6"/>',
+  proximo: '<path d="M9 6l6 6-6 6"/>',
+  lixeira: '<path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/>',
+  publicar: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M5 20h14"/>',
+  ovo: '<path d="M12 3c-3.5 0-6.5 5.5-6.5 10a6.5 6.5 0 0 0 13 0C18.5 8.5 15.5 3 12 3z"/>',
+  imprimir: '<path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/>',
+  som: '<path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 9a4 4 0 0 1 0 6M19 6.5a8 8 0 0 1 0 11"/>',
+  semSom: '<path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 9.5l5 5M22 9.5l-5 5"/>',
+  cliente: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/><path d="M19 3v4M17 5h4"/>',
+  ajustes: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+  convite: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>'
+};
+
+function icone(nome) {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    (ICONES[nome] || '') + '</svg>';
+}
+
+// Troca todo elemento com data-icone="nome" pelo desenho correspondente
+function preencherIcones(raiz) {
+  (raiz || document).querySelectorAll('[data-icone]').forEach(function(elemento) {
+    elemento.innerHTML = icone(elemento.dataset.icone);
+  });
+}
+
+// ----------------------------------------------------------------
+// ATALHOS PARA CRIAR ELEMENTOS
+// ----------------------------------------------------------------
+function $(id) {
+  return document.getElementById(id);
+}
+
+function el(tag, classe, texto) {
+  const elemento = document.createElement(tag);
+  if (classe) elemento.className = classe;
+  if (texto !== undefined && texto !== null) elemento.textContent = texto;
+  return elemento;
+}
+
+function criarBotao(texto, opcoes) {
+  opcoes = opcoes || {};
+  const botao = el('button', 'botao ' + (opcoes.classe || 'botao-secundario'));
+  botao.type = 'button';
+
+  if (opcoes.icone) {
+    const span = el('span');
+    span.innerHTML = icone(opcoes.icone);
+    botao.appendChild(span.firstChild);
+  }
+
+  if (texto) botao.appendChild(document.createTextNode(texto));
+  if (opcoes.titulo) botao.title = opcoes.titulo;
+  if (opcoes.aoClicar) botao.addEventListener('click', opcoes.aoClicar);
+
+  return botao;
+}
+
+function criarEtiqueta(texto, cor) {
+  return el('span', 'etiqueta etiqueta-' + cor, texto);
+}
+
+// Texto principal e uma ou mais linhas de detalhe menores
+function textoDuplo(principal) {
+  const caixa = el('div');
+  caixa.appendChild(el('div', 'principal', principal));
+
+  Array.prototype.slice.call(arguments, 1).forEach(function(detalhe) {
+    if (detalhe) caixa.appendChild(el('div', 'secundario', detalhe));
+  });
+
+  return caixa;
+}
+
+// ----------------------------------------------------------------
+// FORMATAÇÃO
+// ----------------------------------------------------------------
+function formatarMoeda(valor) {
+  return Number(valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function formatarData(texto) {
+  if (!texto) return '';
+  const partes = String(texto).split('-');
+  if (partes.length !== 3) return texto;
+  return partes[2] + '/' + partes[1] + '/' + partes[0];
+}
+
+function dataParaTexto(data) {
+  return data.getFullYear() + '-' +
+    String(data.getMonth() + 1).padStart(2, '0') + '-' +
+    String(data.getDate()).padStart(2, '0');
+}
+
+function hojeTexto() {
+  return dataParaTexto(new Date());
+}
+
+function hojePorExtenso() {
+  const texto = new Date().toLocaleDateString('pt-BR', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+  });
+  return texto.charAt(0).toUpperCase() + texto.slice(1);
+}
+
+function saudacaoDoHorario() {
+  const hora = new Date().getHours();
+  if (hora < 12) return 'Bom dia';
+  if (hora < 18) return 'Boa tarde';
+  return 'Boa noite';
+}
+
+function primeiroNome(nome) {
+  return String(nome || '').trim().split(/\s+/)[0] || '';
+}
+
+function iniciais(nome) {
+  const partes = String(nome || '').trim().split(/\s+/).filter(Boolean);
+  if (!partes.length) return '?';
+  const primeira = partes[0].charAt(0);
+  const ultima = partes.length > 1 ? partes[partes.length - 1].charAt(0) : '';
+  return (primeira + ultima).toUpperCase();
+}
+
+function normalizarBusca(texto) {
+  return String(texto || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+// ----------------------------------------------------------------
+// COMUNICAÇÃO COM O SERVIDOR
+// ----------------------------------------------------------------
+function api(funcao) {
+  const argumentos = Array.prototype.slice.call(arguments, 1);
+
+  return new Promise(function(resolver, rejeitar) {
+    const executor = google.script.run
+      .withSuccessHandler(resolver)
+      .withFailureHandler(function(erro) {
+        // O Google às vezes coloca "Error: " na frente da mensagem
+        const mensagem = String((erro && erro.message) ? erro.message : erro)
+          .replace(/^(Exception|Error|Erro|TypeError):\s*/i, '');
+
+        const falha = new Error(mensagem);
+
+        if (estado.token && /Sessão (expirada|não encontrada)/.test(mensagem)) {
+          // Com "Manter conectado", a sessão é renovada sem pedir a senha
+          // No modo teste não renova sozinho (voltaria ao sistema real no meio de uma ação)
+          if (estado.usuario && !estado.usuario.modo_teste && loginSalvoDe(estado.usuario.usuario_id)) {
+            falha.sessaoExpirada = true;
+          } else {
+            sessaoExpirada();
+          }
+        }
+
+        rejeitar(falha);
+      });
+
+    // Página aberta antes de uma atualização do sistema: a função nova
+    // ainda não existe para ela. Basta recarregar.
+    if (typeof executor[funcao] !== 'function') {
+      rejeitar(new Error('O sistema foi atualizado. Recarregue a página (tecla F5) para continuar.'));
+      return;
+    }
+
+    executor[funcao].apply(null, argumentos);
+  });
+}
+
+// Mesma coisa, enviando o token da sessão como primeiro argumento.
+// Se a sessão de 6 horas acabou e há login salvo, renova e repete a chamada.
+function apiSessao(funcao) {
+  const argumentos = Array.prototype.slice.call(arguments, 1);
+
+  return api.apply(null, [funcao, estado.token].concat(argumentos))
+    .catch(function(erro) {
+      if (!erro.sessaoExpirada) throw erro;
+
+      return renovarSessao().then(function() {
+        return api.apply(null, [funcao, estado.token].concat(argumentos));
+      });
+    });
+}
+
+// Várias chamadas podem descobrir ao mesmo tempo que a sessão acabou:
+// todas esperam a mesma renovação.
+let renovacaoEmAndamento = null;
+
+function renovarSessao() {
+  if (renovacaoEmAndamento) return renovacaoEmAndamento;
+
+  // Renova sempre com o login salvo DA CONTA DESTA ABA
+  const usuarioId = estado.usuario.usuario_id;
+
+  renovacaoEmAndamento = api('entrarComLoginSalvo', loginSalvoDe(usuarioId), true, usuarioId)
+    .then(function(resposta) {
+      estado.token = resposta.token;
+      guardar('sessao_token', resposta.token);
+    })
+    .catch(function(erro) {
+      apagarLoginSalvo(usuarioId);
+      sessaoExpirada();
+      throw erro;
+    })
+    .finally(function() { renovacaoEmAndamento = null; });
+
+  return renovacaoEmAndamento;
+}
+
+// Deixa o botão "carregando" enquanto a promessa não termina
+function comCarregamento(botao, promessa) {
+  const conteudoOriginal = botao.innerHTML;
+  const larguraOriginal = botao.offsetWidth;
+
+  botao.disabled = true;
+  botao.style.minWidth = larguraOriginal + 'px';
+  botao.innerHTML = '<span class="spinner-pequeno"></span>';
+
+  return promessa.finally(function() {
+    botao.disabled = false;
+    botao.innerHTML = conteudoOriginal;
+    botao.style.minWidth = '';
+  });
+}
+
+// ----------------------------------------------------------------
+// AVISOS (TOAST)
+// ----------------------------------------------------------------
+function avisar(mensagem, tipo) {
+  tipo = tipo || 'sucesso';
+
+  const toast = el('div', 'toast ' + tipo);
+  const marcador = el('span');
+  marcador.innerHTML = icone(tipo === 'erro' ? 'erro' : 'check');
+  toast.appendChild(marcador.firstChild);
+  toast.appendChild(el('div', 'texto', mensagem));
+
+  $('toasts').appendChild(toast);
+
+  setTimeout(function() {
+    toast.classList.add('saindo');
+    setTimeout(function() { toast.remove(); }, 250);
+  }, tipo === 'erro' ? 6000 : 3500);
+}
+
+// ----------------------------------------------------------------
+// JANELAS (MODAL)
+// ----------------------------------------------------------------
+function abrirModal(titulo, conteudo, opcoes) {
+  opcoes = opcoes || {};
+
+  $('modalTitulo').textContent = titulo;
+  $('modalCorpo').innerHTML = '';
+  $('modalCorpo').appendChild(conteudo);
+  $('modal').classList.toggle('pequeno', !!opcoes.pequeno);
+  $('modal').classList.toggle('largo', !!opcoes.largo);
+  $('modalFundo').hidden = false;
+  document.body.style.overflow = 'hidden';
+
+  preencherIcones($('modalCorpo'));
+
+  // Foca o primeiro campo (no computador)
+  if (window.innerWidth > 900) {
+    const primeiro = conteudo.querySelector('input:not([type=hidden]):not([readonly]), select');
+    if (primeiro) {
+      setTimeout(function() {
+        // Só foca se a pessoa ainda não clicou em outro campo
+        if (!$('modalCorpo').contains(document.activeElement)) primeiro.focus();
+      }, 50);
+    }
+  }
+}
+
+function fecharModal() {
+  $('modalFundo').hidden = true;
+  $('modalCorpo').innerHTML = '';
+  document.body.style.overflow = '';
+}
+
+$('modalFechar').addEventListener('click', fecharModal);
+
+// Confirmação com a aparência do sistema (substitui o confirm do navegador)
+function confirmar(opcoes) {
+  return new Promise(function(resolver) {
+    $('confirmacaoTitulo').textContent = opcoes.titulo || 'Confirmar';
+    $('confirmacaoTexto').textContent = opcoes.mensagem || '';
+
+    const ok = $('confirmacaoOk');
+    const cancelar = $('confirmacaoCancelar');
+
+    ok.textContent = opcoes.textoBotao || 'Confirmar';
+    ok.className = 'botao ' + (opcoes.perigo ? 'botao-perigo' : 'botao-primario');
+    cancelar.textContent = opcoes.textoCancelar || 'Cancelar';
+
+    $('confirmacaoFundo').hidden = false;
+    ok.focus();
+
+    function terminar(resposta) {
+      $('confirmacaoFundo').hidden = true;
+      ok.removeEventListener('click', aoConfirmar);
+      cancelar.removeEventListener('click', aoCancelar);
+      document.removeEventListener('keydown', aoTeclar);
+      resolver(resposta);
+    }
+
+    function aoConfirmar() { terminar(true); }
+    function aoCancelar() { terminar(false); }
+    function aoTeclar(evento) { if (evento.key === 'Escape') terminar(false); }
+
+    ok.addEventListener('click', aoConfirmar);
+    cancelar.addEventListener('click', aoCancelar);
+    document.addEventListener('keydown', aoTeclar);
+  });
+}
+
+// ----------------------------------------------------------------
+// FORMULÁRIOS EM JANELA
+// ----------------------------------------------------------------
+function clonarModelo(id) {
+  return document.getElementById(id).content.firstElementChild.cloneNode(true);
+}
+
+// Lê os campos do formulário pelo atributo name
+function lerFormulario(form) {
+  const dados = {};
+
+  Array.prototype.forEach.call(form.elements, function(campo) {
+    if (!campo.name) return;
+    dados[campo.name] = campo.type === 'checkbox' ? campo.checked : campo.value;
+  });
+
+  return dados;
+}
+
+function preencherFormulario(form, dados) {
+  Object.keys(dados || {}).forEach(function(nome) {
+    const campo = form.elements[nome];
+    if (!campo) return;
+
+    if (campo.type === 'checkbox') {
+      campo.checked = !!dados[nome];
+    } else {
+      campo.value = dados[nome] === null || dados[nome] === undefined ? '' : dados[nome];
+    }
+  });
+}
+
+function mostrarErroFormulario(form, mensagem) {
+  const caixa = form.querySelector('[data-erro]');
+
+  if (!caixa) {
+    avisar(mensagem, 'erro');
+    return;
+  }
+
+  caixa.textContent = mensagem;
+  caixa.hidden = !mensagem;
+
+  if (mensagem) caixa.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+// Abre um formulário numa janela e cuida do envio.
+// aoEnviar(dados, form) deve devolver uma promessa; se ela der certo, a janela fecha.
+function abrirFormulario(opcoes) {
+  const form = clonarModelo(opcoes.modelo);
+
+  if (opcoes.aoAbrir) opcoes.aoAbrir(form);
+
+  const botaoEnviar = form.querySelector('[data-enviar]');
+  if (opcoes.textoBotao && botaoEnviar) botaoEnviar.textContent = opcoes.textoBotao;
+
+  form.querySelectorAll('[data-cancelar]').forEach(function(botao) {
+    botao.addEventListener('click', fecharModal);
+  });
+
+  form.addEventListener('submit', function(evento) {
+    evento.preventDefault();
+    mostrarErroFormulario(form, '');
+
+    let promessa;
+
+    try {
+      promessa = Promise.resolve(opcoes.aoEnviar(lerFormulario(form), form));
+    } catch (erro) {
+      promessa = Promise.reject(erro);
+    }
+
+    comCarregamento(botaoEnviar, promessa)
+      .then(function(resultado) {
+        if (resultado === false) return;
+        fecharModal();
+        if (opcoes.depois) opcoes.depois(resultado);
+      })
+      .catch(function(erro) {
+        mostrarErroFormulario(form, erro.message);
+      });
+  });
+
+  abrirModal(opcoes.titulo, form, { pequeno: opcoes.pequeno, largo: opcoes.largo });
+  return form;
+}
+
+// ----------------------------------------------------------------
+// MÁSCARAS DE DIGITAÇÃO (data-mascara="telefone|cnpj|moeda")
+// ----------------------------------------------------------------
+const MASCARAS = {
+  telefone: function(valor) {
+    const n = valor.replace(/\D/g, '').slice(0, 11);
+    if (n.length <= 2) return n.length ? '(' + n : '';
+    if (n.length <= 6) return '(' + n.slice(0, 2) + ') ' + n.slice(2);
+    if (n.length <= 10) return '(' + n.slice(0, 2) + ') ' + n.slice(2, 6) + '-' + n.slice(6);
+    return '(' + n.slice(0, 2) + ') ' + n.slice(2, 7) + '-' + n.slice(7);
+  },
+
+  cnpj: function(valor) {
+    const n = valor.replace(/\D/g, '').slice(0, 14);
+    let texto = n.slice(0, 2);
+    if (n.length > 2) texto += '.' + n.slice(2, 5);
+    if (n.length > 5) texto += '.' + n.slice(5, 8);
+    if (n.length > 8) texto += '/' + n.slice(8, 12);
+    if (n.length > 12) texto += '-' + n.slice(12);
+    return texto;
+  },
+
+  // Digitação tipo caixa registradora: 1850 vira 18,50
+  moeda: function(valor) {
+    const n = valor.replace(/\D/g, '').replace(/^0+/, '').slice(0, 8);
+    if (!n) return '';
+    return (Number(n) / 100).toLocaleString('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  }
+};
+
+document.addEventListener('input', function(evento) {
+  const campo = evento.target;
+  const mascara = campo.dataset && MASCARAS[campo.dataset.mascara];
+  if (mascara) campo.value = mascara(campo.value);
+});
+
+function aplicarMascara(valor, tipo) {
+  return MASCARAS[tipo] ? MASCARAS[tipo](String(valor || '')) : valor;
+}
+
+// Botão de mostrar/ocultar senha
+document.addEventListener('click', function(evento) {
+  const botao = evento.target.closest('[data-mostrar-senha]');
+  if (!botao) return;
+
+  const campo = $(botao.dataset.mostrarSenha);
+  campo.type = campo.type === 'password' ? 'text' : 'password';
+  botao.title = campo.type === 'password' ? 'Mostrar senha' : 'Ocultar senha';
+});
+
+// ----------------------------------------------------------------
+// LISTAS (tabela no computador, cartões no celular)
+// ----------------------------------------------------------------
+// colunas: [{ titulo, largura, valor(item) }]  — a primeira coluna é o título do cartão
+// acoes(item): devolve uma lista de botões; larguraAcoes: largura fixa dessa coluna
+function renderizarLista(container, opcoes) {
+  container.innerHTML = '';
+
+  if (!opcoes.itens.length) {
+    container.appendChild(estadoVazio(opcoes.vazio || {}));
+    return;
+  }
+
+  const colunas = opcoes.colunas;
+  const larguras = colunas.map(function(c) { return c.largura || 'minmax(0, 1fr)'; });
+  if (opcoes.acoes) larguras.push(opcoes.larguraAcoes || '180px');
+
+  const lista = el('div', 'lista');
+  lista.style.setProperty('--colunas', larguras.join(' '));
+
+  const cabecalho = el('div', 'lista-cabecalho');
+  colunas.forEach(function(coluna) { cabecalho.appendChild(el('div', '', coluna.titulo)); });
+  if (opcoes.acoes) cabecalho.appendChild(el('div', '', ''));
+  lista.appendChild(cabecalho);
+
+  opcoes.itens.forEach(function(item) {
+    const linha = el('div', 'lista-linha');
+    if (opcoes.apagada && opcoes.apagada(item)) linha.classList.add('apagada');
+
+    colunas.forEach(function(coluna, indice) {
+      const celula = el('div', 'lista-celula' + (indice === 0 ? ' celula-titulo' : ''));
+      celula.dataset.rotulo = coluna.titulo;
+
+      const valor = coluna.valor(item);
+
+      if (valor instanceof Node) {
+        celula.appendChild(valor);
+      } else {
+        celula.textContent = (valor === null || valor === undefined || valor === '') ? '—' : valor;
+      }
+
+      linha.appendChild(celula);
+    });
+
+    if (opcoes.acoes) {
+      const celulaAcoes = el('div', 'lista-celula lista-acoes');
+      opcoes.acoes(item).forEach(function(botao) { celulaAcoes.appendChild(botao); });
+      linha.appendChild(celulaAcoes);
+    }
+
+    lista.appendChild(linha);
+  });
+
+  container.appendChild(lista);
+}
+
+function estadoVazio(opcoes) {
+  const caixa = el('div', 'estado-vazio');
+  const desenho = el('div');
+  desenho.innerHTML = icone(opcoes.icone || 'vazio');
+  caixa.appendChild(desenho.firstChild);
+  caixa.appendChild(el('strong', '', opcoes.titulo || 'Nada por aqui'));
+  if (opcoes.texto) caixa.appendChild(el('div', '', opcoes.texto));
+  if (opcoes.botao) caixa.appendChild(opcoes.botao);
+  return caixa;
+}
+
+function mostrarCarregandoLista(container, quantidade) {
+  container.innerHTML = '';
+  for (let i = 0; i < (quantidade || 4); i++) {
+    container.appendChild(el('div', 'esqueleto'));
+  }
+}
+
+function mostrarErroLista(container, mensagem, tentarNovamente) {
+  container.innerHTML = '';
+  container.appendChild(estadoVazio({
+    icone: 'erro',
+    titulo: 'Não foi possível carregar',
+    texto: mensagem,
+    botao: tentarNovamente
+      ? criarBotao('Tentar novamente', { aoClicar: tentarNovamente })
+      : null
+  }));
+}
+
+function criarIndicador(opcoes) {
+  const cartao = el('div', 'indicador');
+
+  const desenho = el('div', 'indicador-icone ' + (opcoes.cor || ''));
+  desenho.innerHTML = icone(opcoes.icone);
+  cartao.appendChild(desenho);
+
+  const textos = el('div');
+  textos.appendChild(el('div', 'indicador-rotulo', opcoes.rotulo));
+  textos.appendChild(el('div', 'indicador-valor', opcoes.valor));
+  if (opcoes.detalhe) textos.appendChild(el('div', 'indicador-detalhe', opcoes.detalhe));
+  cartao.appendChild(textos);
+
+  return cartao;
+}
+
+function criarAlerta(texto, opcoes) {
+  opcoes = opcoes || {};
+  const alerta = el('div', 'alerta ' + (opcoes.tipo || ''));
+  const desenho = el('span');
+  desenho.innerHTML = icone(opcoes.icone || 'alerta');
+  alerta.appendChild(desenho.firstChild);
+  alerta.appendChild(el('div', 'texto', texto));
+  if (opcoes.botao) alerta.appendChild(opcoes.botao);
+  return alerta;
+}
+
+// Colunas da lista de funcionários (usadas pelo restaurante e pela empresa)
+function colunasFuncionarios() {
+  return [
+    { titulo: 'Nome', largura: 'minmax(0, 2.2fr)', valor: function(f) { return textoDuplo(f.nome, f.setor); } },
+    { titulo: 'Matrícula', valor: function(f) { return f.matricula; } },
+    { titulo: 'Telefone', valor: function(f) { return f.telefone; } },
+    { titulo: 'Personaliza', largura: 'minmax(0, .9fr)', valor: function(f) {
+      return f.pode_alterar_quentinha ? criarEtiqueta('Sim', 'azul') : 'Não';
+    } },
+    { titulo: 'Situação', largura: 'minmax(0, .9fr)', valor: function(f) {
+      return f.status === 'ATIVO' ? criarEtiqueta('Ativo', 'verde') : criarEtiqueta('Inativo', 'cinza');
+    } }
+  ];
+}
+
+function filtrarFuncionarios(lista, busca, status) {
+  const termo = normalizarBusca(busca);
+
+  return lista.filter(function(f) {
+    if (status && status !== 'TODOS' && f.status !== status) return false;
+    if (!termo) return true;
+    return normalizarBusca(f.nome + ' ' + f.matricula + ' ' + f.setor).indexOf(termo) !== -1;
+  });
+}
+
+// Dados com menos de 30 segundos não precisam ser buscados de novo
+const VALIDADE_DADOS_MS = 30000;
+
+function recente(momento) {
+  return !!momento && (Date.now() - momento) < VALIDADE_DADOS_MS;
+}
+
+function ordenarPorNome(lista, campo) {
+  return lista.sort(function(a, b) {
+    return String(a[campo] || '').localeCompare(String(b[campo] || ''), 'pt-BR');
+  });
+}
+
+// Troca (ou acrescenta) um item numa lista em memória, pelo campo-chave
+function substituirItem(lista, chave, item) {
+  if (!item) return lista;
+
+  const indice = lista.findIndex(function(atual) { return atual[chave] === item[chave]; });
+
+  if (indice === -1) {
+    lista.push(item);
+  } else {
+    lista[indice] = item;
+  }
+
+  return lista;
+}
+
+function removerItem(lista, chave, valor) {
+  const indice = lista.findIndex(function(atual) { return atual[chave] === valor; });
+  if (indice !== -1) lista.splice(indice, 1);
+  return lista;
+}
+
+// Quando a tela já mostra dados antigos e a atualização falha,
+// avisa sem apagar o que está na tela.
+function falhaAoAtualizar(container, erro, tentarNovamente, jaTemDados) {
+  if (jaTemDados) {
+    avisar('Não foi possível atualizar: ' + erro.message, 'erro');
+  } else {
+    mostrarErroLista(container, erro.message, tentarNovamente);
+  }
+}
+
+function recarregarTelaAtual() {
+  const tela = TELAS[estado.telaAtual];
+  if (tela && tela.carregar) tela.carregar({});
+}
+
+// ----------------------------------------------------------------
+// COPIAR TEXTO
+// ----------------------------------------------------------------
+function copiarTexto(texto) {
+  function metodoAntigo() {
+    const area = el('textarea');
+    area.value = texto;
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand('copy');
+    area.remove();
+    return ok;
+  }
+
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(texto)
+      .then(function() { return true; })
+      .catch(function() { return metodoAntigo(); });
+  }
+
+  return Promise.resolve(metodoAntigo());
+}
+
+// Janela com e-mail e senha para enviar ao responsável
+function mostrarCredenciais(titulo, descricao, dados) {
+  const caixa = clonarModelo('tplCredenciais');
+
+  caixa.querySelector('[data-descricao]').textContent = descricao;
+  caixa.querySelector('[data-email]').textContent = dados.email;
+  caixa.querySelector('[data-senha]').textContent = dados.senha;
+
+  const linhaEndereco = caixa.querySelector('[data-endereco]');
+  if (dados.endereco_aplicativo) {
+    linhaEndereco.textContent = dados.endereco_aplicativo;
+  } else {
+    linhaEndereco.parentElement.remove();
+  }
+
+  caixa.querySelector('[data-cancelar]').addEventListener('click', fecharModal);
+
+  caixa.querySelector('[data-copiar]').addEventListener('click', function() {
+    const texto =
+      'Acesso ao sistema Tempero de Mãe\n' +
+      (dados.endereco_aplicativo ? 'Endereço: ' + dados.endereco_aplicativo + '\n' : '') +
+      'E-mail: ' + dados.email + '\n' +
+      'Senha: ' + dados.senha + '\n\n' +
+      'Depois de entrar, troque a senha em "Trocar minha senha".';
+
+    copiarTexto(texto).then(function(ok) {
+      avisar(ok ? 'Dados copiados. Agora é só colar no WhatsApp ou e-mail.' : 'Não foi possível copiar. Selecione o texto manualmente.',
+        ok ? 'sucesso' : 'erro');
+    });
+  });
+
+  abrirModal(titulo, caixa, { pequeno: true });
+}
+
+// Gera uma senha forte e fácil de ler (ex.: Kp7m-Qx3t-Wb9n)
+function gerarSenha() {
+  const alfabeto = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  const numeros = new Uint32Array(12);
+  window.crypto.getRandomValues(numeros);
+
+  let senha = '';
+  for (let i = 0; i < 12; i++) {
+    senha += alfabeto[numeros[i] % alfabeto.length];
+    if (i === 3 || i === 7) senha += '-';
+  }
+  return senha;
+}
+
+// ----------------------------------------------------------------
+// MENUS E NAVEGAÇÃO
+// ----------------------------------------------------------------
+const MENUS = {
+  admin: [
+    { id: 'inicio-admin', titulo: 'Início', icone: 'inicio' },
+    { id: 'dashboard', titulo: 'Dashboard', icone: 'pizza', permissao: 'dashboard' },
+    { grupo: 'Cadastros' },
+    { id: 'empresas', titulo: 'Empresas', icone: 'empresa', permissao: 'empresas' },
+    { id: 'precos', titulo: 'Preços', icone: 'preco', permissao: 'precos' },
+    { id: 'funcionarios-admin', titulo: 'Funcionários', icone: 'pessoas', permissao: 'funcionarios' },
+    { grupo: 'Operação' },
+    { id: 'cardapios', titulo: 'Cardápios', icone: 'cardapio', permissao: 'cardapios' },
+    { id: 'pedidos', titulo: 'Pedidos', icone: 'pedido', permissao: 'pedidos' },
+    { grupo: 'Financeiro' },
+    { id: 'cobrancas', titulo: 'Cobranças', icone: 'cobranca', recurso: 'cobrancas', permissao: 'cobrancas' },
+    { id: 'relatorios', titulo: 'Relatórios', icone: 'relatorio', permissao: 'relatorios' },
+    { grupo: 'Sistema', somenteProprietario: true },
+    { id: 'configuracoes', titulo: 'Configurações', icone: 'ajustes', somenteProprietario: true },
+    { id: 'acessos', titulo: 'Acessos', icone: 'chave', somenteProprietario: true }
+  ],
+  empresa: [
+    { id: 'inicio-empresa', titulo: 'Início', icone: 'inicio' },
+    { id: 'pedidos-empresa', titulo: 'Pedido de hoje', icone: 'pedido' },
+    { id: 'cardapio-empresa', titulo: 'Cardápio', icone: 'cardapio' },
+    { id: 'funcionarios-empresa', titulo: 'Funcionários', icone: 'pessoas' },
+    { id: 'cobrancas-empresa', titulo: 'Cobranças', icone: 'cobranca', recurso: 'cobrancas' }
+  ]
+};
+
+// Itens que aparecem na barra inferior do celular
+const BARRA_INFERIOR = {
+  admin: ['inicio-admin', 'pedidos', 'cardapios', 'empresas'],
+  empresa: ['inicio-empresa', 'pedidos-empresa', 'cardapio-empresa', 'funcionarios-empresa']
+};
+
+// Itens marcados "somenteProprietario" só aparecem para o dono do restaurante.
+// Itens com "recurso" somem quando a função está desligada (Sistema › Configurações).
+function recursoLigado(nome) {
+  const recursos = estado.usuario && estado.usuario.recursos;
+  return !recursos || recursos[nome] !== false;
+}
+
+// Abas e funções liberadas pelo proprietário (Sistema › Acessos)
+function telaLiberada(chave) {
+  if (!estado.usuario || estado.usuario.perfil !== 'admin') return true;
+  const telas = estado.usuario.recursos && estado.usuario.recursos.telas;
+  return !telas || telas[chave] === true;
+}
+
+function podeFazer(funcao) {
+  if (!estado.usuario || estado.usuario.perfil !== 'admin') return false;
+  const funcoes = estado.usuario.recursos && estado.usuario.recursos.funcoes;
+  return !funcoes || funcoes[funcao] === true;
+}
+
+function itensDoMenu() {
+  const itens = (MENUS[estado.usuario.perfil] || []).filter(function(item) {
+    if (item.somenteProprietario && !estado.usuario.proprietario) return false;
+    if (item.recurso && !recursoLigado(item.recurso)) return false;
+    if (item.permissao && !telaLiberada(item.permissao)) return false;
+    return true;
+  });
+
+  // Tira os títulos de grupo que ficaram sem nenhuma tela
+  return itens.filter(function(item, i) {
+    if (!item.grupo) return true;
+    const proximo = itens[i + 1];
+    return !!proximo && !proximo.grupo;
+  });
+}
+
+// O proprietário mudou as configurações: refaz os menus sem recarregar
+function aplicarRecursos(recursos) {
+  if (!recursos || !estado.usuario) return;
+  if (JSON.stringify(recursos) === JSON.stringify(estado.usuario.recursos || null)) return;
+
+  const funcoesAntes = JSON.stringify((estado.usuario.recursos && estado.usuario.recursos.funcoes) || null);
+  estado.usuario.recursos = recursos;
+  montarMenus();
+  const funcoesMudaram = funcoesAntes !== JSON.stringify(recursos.funcoes || null);
+
+  const atual = itensDoMenu().find(function(i) { return i.id === estado.telaAtual; });
+
+  if (!atual) {
+    fecharModal();
+    irPara(itensDoMenu()[0].id);
+    avisar('Esta tela foi desligada pelo restaurante.');
+    return;
+  }
+
+  document.querySelectorAll('[data-tela]').forEach(function(botao) {
+    botao.classList.toggle('ativo', botao.dataset.tela === estado.telaAtual);
+  });
+
+  AO_MUDAR_RECURSOS.forEach(function(avisarTela) {
+    try { avisarTela(recursos); } catch (erro) { console.error(erro); }
+  });
+
+  // Funções liberadas/bloqueadas: redesenha a tela atual com os botões certos
+  if (funcoesMudaram && TELAS[estado.telaAtual] && TELAS[estado.telaAtual].carregar) {
+    try { TELAS[estado.telaAtual].carregar(); } catch (erro) { console.error(erro); }
+  }
+}
+
+// Telas que precisam se refazer quando as configurações mudam
+const AO_MUDAR_RECURSOS = [];
+
+function montarMenus() {
+  const menu = $('menuLateral');
+  const barra = $('barraInferior');
+  menu.innerHTML = '';
+  barra.innerHTML = '';
+
+  itensDoMenu().forEach(function(item) {
+    if (item.grupo) {
+      menu.appendChild(el('div', 'menu-grupo', item.grupo));
+      return;
+    }
+
+    const botao = el('button', 'menu-item');
+    botao.type = 'button';
+    botao.dataset.tela = item.id;
+    botao.innerHTML = icone(item.icone);
+    botao.appendChild(el('span', '', item.titulo));
+    if (item.emBreve) botao.appendChild(el('span', 'selo-breve', 'em breve'));
+    botao.addEventListener('click', function() { irPara(item.id); });
+    menu.appendChild(botao);
+  });
+
+  const idsBarra = BARRA_INFERIOR[estado.usuario.perfil] || [];
+
+  idsBarra.forEach(function(id) {
+    const item = itensDoMenu().find(function(i) { return i.id === id; });
+    if (!item) return;
+    barra.appendChild(criarItemBarra(item.titulo, item.icone, function() { irPara(id); }, id));
+  });
+
+  // "Mais" abre o menu completo quando há mais telas do que cabem na barra
+  const totalTelas = itensDoMenu().filter(function(i) { return i.id; }).length;
+
+  if (totalTelas > idsBarra.length) {
+    barra.appendChild(criarItemBarra('Mais', 'mais', abrirMenuCelular));
+  }
+}
+
+// Número em destaque ao lado de um item do menu (ex.: pedidos pendentes)
+function marcarContadorMenu(id, quantidade) {
+  document.querySelectorAll('[data-tela="' + id + '"]').forEach(function(botao) {
+    let selo = botao.querySelector('.contador-menu');
+
+    if (!quantidade) {
+      if (selo) selo.remove();
+      return;
+    }
+
+    if (!selo) {
+      selo = el('span', 'contador-menu');
+      botao.appendChild(selo);
+    }
+
+    selo.textContent = quantidade > 99 ? '99+' : String(quantidade);
+  });
+}
+
+// Título da aba do navegador, com o número de pendências na frente: "(2) Pedidos"
+function definirTitulo(titulo) {
+  if (titulo) estado.tituloPagina = titulo;
+  const prefixo = estado.pendenciasTitulo ? '(' + estado.pendenciasTitulo + ') ' : '';
+  document.title = prefixo + (estado.tituloPagina || 'Início') + ' · Tempero de Mãe';
+}
+
+function criarItemBarra(titulo, nomeIcone, aoClicar, id) {
+  const botao = el('button', 'item-barra');
+  botao.type = 'button';
+  if (id) botao.dataset.tela = id;
+  botao.innerHTML = icone(nomeIcone);
+  botao.appendChild(el('span', '', titulo));
+  botao.addEventListener('click', aoClicar);
+  return botao;
+}
+
+function irPara(id, parametros) {
+  const item = itensDoMenu().find(function(i) { return i.id === id; });
+  if (!item) return;
+
+  // Avisa a tela atual que ela vai ser fechada (ex.: salvar o que falta)
+  const telaAnterior = TELAS[estado.telaAtual];
+  if (telaAnterior && telaAnterior.aoSair && estado.telaAtual !== id) telaAnterior.aoSair();
+
+  estado.telaAtual = id;
+  guardar('tela_atual', id);
+
+  fecharMenuCelular();
+  $('menuConta').hidden = true;
+
+  // Marca o item ativo nos dois menus
+  document.querySelectorAll('[data-tela]').forEach(function(botao) {
+    botao.classList.toggle('ativo', botao.dataset.tela === id);
+  });
+
+  $('tituloPagina').textContent = item.titulo;
+  definirTitulo(item.titulo);
+
+  const idView = item.emBreve ? 'em-breve' : id;
+
+  document.querySelectorAll('.view').forEach(function(view) {
+    view.hidden = view.dataset.view !== idView;
+  });
+
+  if (item.emBreve) {
+    $('emBreveIcone').innerHTML = icone(item.icone);
+    $('emBreveTitulo').textContent = item.titulo + ' — em construção';
+    $('emBreveTexto').textContent = item.texto || 'Este módulo será liberado nas próximas etapas.';
+  } else if (TELAS[id] && TELAS[id].carregar) {
+    TELAS[id].carregar(parametros || {});
+  }
+
+  window.scrollTo(0, 0);
+}
+
+function abrirMenuCelular() { $('app').classList.add('menu-aberto'); }
+function fecharMenuCelular() { $('app').classList.remove('menu-aberto'); }
+
+$('botaoAbrirMenu').addEventListener('click', abrirMenuCelular);
+$('sidebarFundo').addEventListener('click', fecharMenuCelular);
+
+$('botaoConta').addEventListener('click', function(evento) {
+  evento.stopPropagation();
+  $('menuConta').hidden = !$('menuConta').hidden;
+});
+
+document.addEventListener('click', function(evento) {
+  if (!evento.target.closest('.topo-conta')) $('menuConta').hidden = true;
+
+  const acao = evento.target.closest('[data-acao]');
+  if (!acao) return;
+
+  if (acao.dataset.acao === 'sair') sair();
+  if (acao.dataset.acao === 'trocar-senha') abrirTrocarSenha();
+  if (acao.dataset.acao === 'modo-teste') entrarModoTeste();
+  if (acao.dataset.acao === 'sair-teste') sairModoTeste();
+});
+
+document.addEventListener('keydown', function(evento) {
+  if (evento.key !== 'Escape') return;
+  if (!$('confirmacaoFundo').hidden) return;
+
+  if (!$('modalFundo').hidden) {
+    fecharModal();
+  } else {
+    $('menuConta').hidden = true;
+    fecharMenuCelular();
+  }
+});
+
+// ----------------------------------------------------------------
+// SESSÃO (mantém o login ao atualizar a página)
+// ----------------------------------------------------------------
+function guardar(chave, valor) {
+  try { sessionStorage.setItem(chave, valor); } catch (erro) { /* navegador bloqueou */ }
+}
+
+function ler(chave) {
+  try { return sessionStorage.getItem(chave); } catch (erro) { return null; }
+}
+
+function apagar(chave) {
+  try { sessionStorage.removeItem(chave); } catch (erro) { /* nada */ }
+}
+
+// Guardado no aparelho mesmo depois de fechar o navegador ("Manter conectado")
+function guardarPermanente(chave, valor) {
+  try { localStorage.setItem(chave, valor); } catch (erro) { /* navegador bloqueou */ }
+}
+
+function lerPermanente(chave) {
+  try { return localStorage.getItem(chave); } catch (erro) { return null; }
+}
+
+function apagarPermanente(chave) {
+  try { localStorage.removeItem(chave); } catch (erro) { /* nada */ }
+}
+
+// ----------------------------------------------------------------
+// LOGINS SALVOS ("Manter conectado")
+// Um por conta: o aparelho pode ter o restaurante e uma empresa
+// conectados em abas diferentes sem que uma interfira na outra.
+// ----------------------------------------------------------------
+function lerLoginsSalvos() {
+  try { return JSON.parse(lerPermanente('logins_salvos') || '{}') || {}; } catch (erro) { return {}; }
+}
+
+function loginSalvoDe(usuarioId) {
+  return usuarioId ? lerLoginsSalvos()[usuarioId] || null : null;
+}
+
+function guardarLoginSalvo(usuarioId, lembrete) {
+  const logins = lerLoginsSalvos();
+  logins[usuarioId] = lembrete;
+  guardarPermanente('logins_salvos', JSON.stringify(logins));
+  guardarPermanente('ultimo_login_salvo', usuarioId);
+  apagarPermanente('login_salvo');   // formato antigo (um só para o aparelho)
+}
+
+function apagarLoginSalvo(usuarioId) {
+  const logins = lerLoginsSalvos();
+  delete logins[usuarioId];
+  guardarPermanente('logins_salvos', JSON.stringify(logins));
+  if (lerPermanente('ultimo_login_salvo') === usuarioId) apagarPermanente('ultimo_login_salvo');
+}
+
+// Login usado ao abrir o sistema numa aba nova: o da última conta que entrou
+function loginSalvoAoAbrir() {
+  return loginSalvoDe(lerPermanente('ultimo_login_salvo')) || lerPermanente('login_salvo');
+}
+
+function mostrarLogin() {
+  $('telaCarregando').hidden = true;
+  $('app').hidden = true;
+  $('telaConvite').hidden = true;
+  $('telaLogin').hidden = false;
+  document.title = 'Entrar · Tempero de Mãe';
+  $('loginEmail').focus();
+}
+
+function entrar(token, usuario, dadosIniciais) {
+  estado.token = token;
+  estado.usuario = usuario;
+  guardar('sessao_token', token);
+
+  const nomeExibido = usuario.perfil === 'admin' ? usuario.nome : (usuario.nome_empresa || usuario.nome);
+  const perfilExibido = usuario.perfil === 'admin' ? 'Restaurante' : 'Responsável: ' + primeiroNome(usuario.nome);
+
+  $('sidebarAvatar').textContent = iniciais(nomeExibido);
+  $('sidebarNome').textContent = nomeExibido;
+  $('sidebarPerfil').textContent = perfilExibido;
+  $('botaoConta').textContent = iniciais(usuario.nome);
+  $('contaNome').textContent = usuario.nome;
+  $('contaEmail').textContent = usuario.perfil === 'empresa' && usuario.login ? 'Usuário: ' + usuario.login : usuario.email;
+
+  mostrarModoTeste(usuario);
+  montarMenus();
+
+  AO_ENTRAR.forEach(function(receber) {
+    try { receber(dadosIniciais || {}, usuario); } catch (erro) { console.error(erro); }
+  });
+
+  $('telaCarregando').hidden = true;
+  $('telaLogin').hidden = true;
+  $('telaConvite').hidden = true;
+  $('app').hidden = false;
+
+  const ultimaTela = ler('tela_atual');
+  const telaValida = itensDoMenu().some(function(i) { return i.id === ultimaTela; });
+
+  irPara(telaValida ? ultimaTela : itensDoMenu()[0].id);
+}
+
+function sessaoExpirada() {
+  if (!estado.token) return;
+  estado.token = null;
+  apagar('sessao_token');
+  fecharModal();
+  avisar('Sua sessão expirou. Entre novamente.', 'erro');
+  mostrarLogin();
+}
+
+// SAIR
+// Não recarrega a página: dentro do Google Apps Script, recarregar por
+// código deixa a tela em branco. Em vez disso, termina o que estiver
+// salvando, apaga da memória os dados de quem saiu e mostra o login.
+function sair() {
+  if (!estado.token) return;
+
+  const pedidoNaoEnviado = typeof pedidoEmpresa !== 'undefined' && pedidoEmpresa.alterado;
+
+  const continuar = pedidoNaoEnviado
+    ? confirmar({
+        titulo: 'Sair sem enviar as alterações?',
+        mensagem: 'As mudanças no pedido de hoje ainda não foram enviadas ao restaurante.',
+        textoBotao: 'Sair mesmo assim',
+        textoCancelar: 'Voltar',
+        perigo: true
+      })
+    : Promise.resolve(true);
+
+  continuar
+    .then(function(sim) {
+      if (!sim) return false;
+      return terminarSalvamentos();
+    })
+    .then(function(podeSair) {
+      if (podeSair) encerrarNoAparelho();
+    });
+}
+
+// Cardápio: o restaurante pode ter alterações sendo salvas sozinhas
+function terminarSalvamentos() {
+  if (!estado.usuario || estado.usuario.perfil !== 'admin' || typeof aguardarSalvamento !== 'function') {
+    return Promise.resolve(true);
+  }
+
+  return aguardarSalvamento()
+    .catch(function() { /* o erro já foi mostrado na tela */ })
+    .then(function() {
+      if (!cardapioAdmin.alterado) return true;
+
+      return confirmar({
+        titulo: 'Sair sem salvar o cardápio?',
+        mensagem: 'Algumas alterações do cardápio não foram salvas.',
+        textoBotao: 'Sair mesmo assim',
+        textoCancelar: 'Voltar',
+        perigo: true
+      });
+    });
+}
+
+const BLOCOS_COM_DADOS = [
+  'sidebarAvatar', 'sidebarNome', 'sidebarPerfil', 'botaoConta', 'contaNome', 'contaEmail',
+  'dataHojeAdmin', 'indicadoresAdmin', 'alertasAdmin', 'pedidosHojeAdmin',
+  'contadorEmpresas', 'listaEmpresas', 'listaPrecos', 'contadorFuncionariosAdmin', 'listaFuncionariosAdmin',
+  'dataHojeEmpresa', 'indicadoresEmpresa', 'cardapioDestaqueEmpresa', 'pedidoHojeEmpresa',
+  'contadorFuncionarios', 'listaFuncionarios',
+  'cardapioTopo', 'gradeCardapio', 'cardapioEmpresaTopo', 'gradeCardapioEmpresa',
+  'pedidosTopo', 'pedidosConteudo', 'pedidoEmpresaConteudo',
+  'filtrosRelatorio', 'relatorioConteudo',
+  'contadorAdministradores', 'listaAdministradores', 'configuracoesConteudo',
+  'cobrancasConteudo', 'cobrancasEmpresaConteudo'
+];
+
+function encerrarNoAparelho() {
+  const token = estado.token;
+  const usuarioId = estado.usuario ? estado.usuario.usuario_id : '';
+  const loginSalvo = loginSalvoDe(usuarioId);
+
+  // Avisa o servidor sem esperar a resposta: a tela de login aparece na hora
+  api('encerrarSessao', token, loginSalvo).catch(function() { /* nada */ });
+
+  if (usuarioId) apagarLoginSalvo(usuarioId);
+  apagar('tela_atual');
+  limparDadosDaTela();
+  mostrarLogin();
+}
+
+// Apaga da memória e da tela os dados de quem estava usando
+// (ao sair da conta e ao entrar ou sair do modo teste)
+function limparDadosDaTela() {
+  estado.token = null;
+  estado.usuario = null;
+  estado.telaAtual = null;
+  estado.tituloPagina = null;
+  estado.pendenciasTitulo = 0;
+  apagar('sessao_token');
+
+  AO_SAIR.forEach(function(limpar) {
+    try { limpar(); } catch (erro) { console.error(erro); }
+  });
+
+  fecharModal();
+  fecharMenuCelular();
+  $('menuConta').hidden = true;
+  $('toasts').innerHTML = '';
+  $('areaImpressao').innerHTML = '';
+  document.querySelectorAll('.view').forEach(function(view) { view.hidden = true; });
+
+  // Esvazia o que as telas preencheram com os dados de quem saiu
+  // (volta ao estado de quando a página abriu)
+  BLOCOS_COM_DADOS.forEach(function(id) {
+    const bloco = document.getElementById(id);
+    if (bloco) bloco.textContent = '';
+  });
+
+  $('loginSenha').value = '';
+  $('erroLogin').hidden = true;
+}
+
+// ----------------------------------------------------------------
+// MODO TESTE (somente o proprietário)
+// Troca a sessão por outra que usa uma planilha separada, com dados
+// fictícios. Ao sair, tudo o que foi feito no teste é apagado.
+// ----------------------------------------------------------------
+function mostrarModoTeste(usuario) {
+  const emTeste = !!usuario.modo_teste;
+  document.body.classList.toggle('em-modo-teste', emTeste);
+  $('faixaTeste').hidden = !emTeste;
+
+  document.querySelectorAll('[data-acao="modo-teste"]').forEach(function(botao) {
+    botao.hidden = !(usuario.perfil === 'admin' && usuario.proprietario && !emTeste);
+  });
+}
+
+function trocarModo(resposta, mensagem) {
+  limparDadosDaTela();
+  entrar(resposta.token, resposta.usuario, resposta.dados_iniciais);
+  avisar(mensagem);
+}
+
+function mostrarCarregandoTela(texto) {
+  $('textoCarregando').textContent = texto || '';
+  $('telaCarregando').hidden = false;
+}
+
+function esconderCarregandoTela() {
+  $('telaCarregando').hidden = true;
+  $('textoCarregando').textContent = '';
+}
+
+function entrarModoTeste() {
+  $('menuConta').hidden = true;
+  fecharMenuCelular();
+
+  terminarSalvamentos()
+    .then(function(pode) {
+      if (!pode) return false;
+      return confirmar({
+        titulo: 'Entrar no modo teste?',
+        mensagem: 'Você vai usar uma cópia separada do sistema, com empresas, pedidos e cobranças fictícios. ' +
+          'Pode cadastrar, alterar e apagar à vontade: nada vai para o sistema real, e tudo é apagado quando você sair do teste.',
+        textoBotao: 'Entrar no modo teste',
+        textoCancelar: 'Cancelar'
+      });
+    })
+    .then(function(sim) {
+      if (!sim) return;
+      mostrarCarregandoTela('Preparando o modo teste com dados fictícios…');
+
+      return apiSessao('entrarModoTeste')
+        .then(function(resposta) {
+          esconderCarregandoTela();
+          trocarModo(resposta, 'Você está no modo teste. Nada do que fizer aqui fica salvo.');
+        })
+        .catch(function(erro) {
+          esconderCarregandoTela();
+          avisar(erro.message, 'erro');
+        });
+    });
+}
+
+function sairModoTeste() {
+  confirmar({
+    titulo: 'Sair do modo teste?',
+    mensagem: 'Tudo o que você fez no teste será apagado, e você volta ao sistema real.',
+    textoBotao: 'Sair do teste',
+    textoCancelar: 'Continuar testando'
+  }).then(function(sim) {
+    if (!sim) return;
+    mostrarCarregandoTela('Apagando o teste e voltando ao sistema real…');
+
+    return api('sairModoTeste', estado.token)
+      .then(function(resposta) {
+        esconderCarregandoTela();
+        trocarModo(resposta, 'Você voltou ao sistema real. O teste foi apagado.');
+      })
+      .catch(function(erro) {
+        esconderCarregandoTela();
+        avisar(erro.message, 'erro');
+      });
+  });
+}
+
+// LOGIN
+$('formLogin').addEventListener('submit', function(evento) {
+  evento.preventDefault();
+
+  const botao = this.querySelector('button[type=submit]');
+  const erro = $('erroLogin');
+  erro.hidden = true;
+
+  const email = $('loginEmail').value.trim();
+  const senha = $('loginSenha').value;
+
+  if (!email || !senha) {
+    erro.textContent = 'Informe o usuário e a senha.';
+    erro.hidden = false;
+    return;
+  }
+
+  const lembrar = $('loginLembrar').checked;
+  guardarPermanente('lembrar_login', lembrar ? 'sim' : 'nao');
+
+  comCarregamento(botao, api('autenticarUsuario', email, senha, lembrar))
+    .then(function(resposta) {
+      $('loginSenha').value = '';
+
+      if (resposta.lembrete) {
+        guardarLoginSalvo(resposta.usuario.usuario_id, resposta.lembrete);
+      } else {
+        apagarLoginSalvo(resposta.usuario.usuario_id);
+      }
+
+      entrar(resposta.token, resposta.usuario, resposta.dados_iniciais);
+    })
+    .catch(function(falha) {
+      erro.textContent = falha.message;
+      erro.hidden = false;
+    });
+});
+
+// TROCAR MINHA SENHA
+function abrirTrocarSenha() {
+  $('menuConta').hidden = true;
+  fecharMenuCelular();
+
+  abrirFormulario({
+    titulo: 'Trocar minha senha',
+    modelo: 'tplTrocarSenha',
+    pequeno: true,
+    aoEnviar: function(dados) {
+      if (dados.nova.length < TAMANHO_MINIMO_SENHA) throw new Error('A nova senha precisa ter pelo menos ' + TAMANHO_MINIMO_SENHA + ' caracteres.');
+      if (dados.nova !== dados.confirmacao) throw new Error('A confirmação não é igual à nova senha.');
+      return apiSessao('trocarMinhaSenha', dados.atual, dados.nova);
+    },
+    depois: function(resposta) { avisar(resposta.mensagem); }
+  });
+}
+
+// INÍCIO: um link de convite abre a tela de primeiro acesso. Senão,
+// tenta retomar a sessão desta aba e, se não houver, usa o login salvo
+// no aparelho ("Manter conectado").
+// ----------------------------------------------------------------
+// TEMA (claro / escuro / automático)
+// A escolha fica guardada neste aparelho. "Automático" segue o
+// modo escuro do celular ou computador e muda junto com ele.
+// ----------------------------------------------------------------
+const OPCOES_TEMA = [
+  { valor: 'claro', texto: 'Claro', icone: 'sol' },
+  { valor: 'escuro', texto: 'Escuro', icone: 'lua' },
+  { valor: 'auto', texto: 'Auto', icone: 'automatico', dica: 'Segue o aparelho' }
+];
+
+function preferenciaTema() {
+  const tema = lerPermanente('tema');
+  return tema === 'claro' || tema === 'escuro' ? tema : 'auto';
+}
+
+function aparelhoNoEscuro() {
+  try {
+    return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  } catch (erro) { return false; }
+}
+
+function aplicarTema() {
+  const preferencia = preferenciaTema();
+  const escuro = preferencia === 'escuro' || (preferencia === 'auto' && aparelhoNoEscuro());
+  document.documentElement.setAttribute('data-tema', escuro ? 'escuro' : 'claro');
+
+  document.querySelectorAll('.seletor-tema button').forEach(function(botao) {
+    const ativo = botao.dataset.tema === preferencia;
+    botao.classList.toggle('ativo', ativo);
+    botao.setAttribute('aria-pressed', ativo ? 'true' : 'false');
+  });
+}
+
+function escolherTema(tema) {
+  guardarPermanente('tema', tema);
+  aplicarTema();
+}
+
+function montarSeletoresTema() {
+  document.querySelectorAll('[data-seletor-tema]').forEach(function(bloco) {
+    if (bloco.dataset.montado) return;
+    bloco.dataset.montado = 'sim';
+
+    const rotulo = document.createElement('span');
+    rotulo.className = 'rotulo-tema';
+    rotulo.textContent = 'Aparência';
+
+    const grupo = document.createElement('div');
+    grupo.className = 'seletor-tema';
+    grupo.setAttribute('role', 'group');
+    grupo.setAttribute('aria-label', 'Aparência');
+
+    OPCOES_TEMA.forEach(function(opcao) {
+      const botao = document.createElement('button');
+      botao.type = 'button';
+      botao.dataset.tema = opcao.valor;
+      botao.title = opcao.dica || opcao.texto;
+      botao.innerHTML = icone(opcao.icone);
+      const texto = document.createElement('span');
+      texto.className = 'texto-tema';
+      texto.textContent = opcao.texto;
+      botao.appendChild(texto);
+      botao.setAttribute('aria-label', opcao.texto);
+      botao.addEventListener('click', function(evento) {
+        evento.stopPropagation();
+        escolherTema(opcao.valor);
+      });
+      grupo.appendChild(botao);
+    });
+
+    bloco.appendChild(rotulo);
+    bloco.appendChild(grupo);
+  });
+  aplicarTema();
+}
+
+// Se o aparelho mudar de claro para escuro (ex.: à noite), acompanha no modo automático
+(function vigiarTemaDoAparelho() {
+  try {
+    const consulta = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+    if (!consulta) return;
+    const aoMudar = function() { if (preferenciaTema() === 'auto') aplicarTema(); };
+    if (consulta.addEventListener) consulta.addEventListener('change', aoMudar);
+    else if (consulta.addListener) consulta.addListener(aoMudar);
+  } catch (erro) { /* navegador antigo: fica no tema atual */ }
+})();
+
+// ----------------------------------------------------------------
+// FUNDO ANIMADO DO LOGIN
+// Manchas de cor + ícones de cozinha subindo devagar. Posições fixas
+// (não sorteadas) para a tela ficar sempre bonita e equilibrada.
+// ----------------------------------------------------------------
+const ICONES_FUNDO = {
+  quentinha: '<path d="M3 11h18l-1.6 8.2a2 2 0 0 1-2 1.8H6.6a2 2 0 0 1-2-1.8z"/><path d="M7 11a5 5 0 0 1 10 0"/><path d="M12 3v3"/>',
+  tigela: '<path d="M3 11h18a9 9 0 0 1-18 0z"/><path d="M8 7c0-1.5 1.5-1.5 1.5-3M14 7c0-1.5 1.5-1.5 1.5-3"/>',
+  folha: '<path d="M5 19c0-8 6-14 14-14 0 8-6 14-14 14z"/><path d="M5 19l9-9"/>',
+  talheres: '<path d="M7 3v8a2 2 0 0 0 2 2v8M11 3v8a2 2 0 0 1-2 2M9 3v6"/><path d="M17 21V3c-2 1.5-3 4-3 7s1 4 3 4"/>',
+  panela: '<path d="M4 10h16v6a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4z"/><path d="M2 10h20"/><path d="M9 6c0-1 1-1 1-2M14 6c0-1 1-1 1-2"/>',
+  tomate: '<circle cx="12" cy="13" r="7"/><path d="M12 6V4M9 6.5l3 1.5 3-1.5"/>',
+  colher: '<ellipse cx="12" cy="6.5" rx="3.5" ry="4"/><path d="M12 10.5V21"/>'
+};
+
+// [ícone, posição horizontal %, tamanho px, duração s, atraso s, giro]
+const ITENS_FUNDO = [
+  ['quentinha', 6, 38, 24, 0, 25],
+  ['folha', 18, 26, 19, 6, -60],
+  ['talheres', 30, 30, 27, 12, 20],
+  ['tomate', 44, 24, 21, 3, 90],
+  ['tigela', 58, 36, 26, 9, -20],
+  ['folha', 70, 22, 18, 14, 70],
+  ['panela', 82, 34, 29, 2, -30],
+  ['colher', 93, 26, 23, 8, 45],
+  ['quentinha', 50, 28, 31, 18, -40],
+  ['folha', 38, 20, 20, 21, 80],
+  ['talheres', 12, 24, 28, 16, -25],
+  ['tomate', 76, 30, 25, 20, 60],
+  ['tigela', 24, 22, 22, 25, 30],
+  ['colher', 64, 22, 27, 27, -50]
+];
+
+function montarFundosAnimados() {
+  document.querySelectorAll('[data-fundo-animado]').forEach(function(fundo) {
+    if (fundo.dataset.montado) return;
+    fundo.dataset.montado = 'sim';
+
+    ['mancha mancha-1', 'mancha mancha-2', 'mancha mancha-3'].forEach(function(classe) {
+      fundo.appendChild(el('span', classe));
+    });
+
+    ITENS_FUNDO.forEach(function(item, i) {
+      const icone = el('span', 'icone-flutuante');
+      icone.style.left = item[1] + '%';
+      icone.style.setProperty('--tamanho', item[2] + 'px');
+      icone.style.setProperty('--duracao', item[3] + 's');
+      // Atraso negativo: já começa com ícones espalhados pela tela
+      icone.style.setProperty('--atraso', (-item[4]) + 's');
+      icone.style.setProperty('--giro', item[5] + 'deg');
+      icone.style.setProperty('--parado', (15 + (i * 37) % 70) + 'vh');
+      icone.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">' +
+        ICONES_FUNDO[item[0]] + '</svg>';
+      fundo.appendChild(icone);
+    });
+  });
+
+  // Vapor saindo do ícone da marca nas telas de entrada
+  document.querySelectorAll('.tela-login .marca').forEach(function(marca) {
+    if (marca.querySelector('.vapores')) return;
+    const vapores = el('span', 'vapores');
+    vapores.setAttribute('aria-hidden', 'true');
+    for (let i = 0; i < 3; i++) vapores.appendChild(el('span', 'vapor'));
+    marca.insertBefore(vapores, marca.firstChild);
+  });
+}
+
+function iniciar() {
+  preencherIcones();
+  montarSeletoresTema();
+  montarFundosAnimados();
+  $('loginLembrar').checked = lerPermanente('lembrar_login') !== 'nao';
+
+  lerParametrosEndereco(function(parametros) {
+    if (parametros.convite) {
+      abrirTelaConvite(parametros.convite);
+      return;
+    }
+    iniciarSessao();
+  });
+}
+
+// Parâmetros do endereço (?convite=...). Dentro do Google, a página roda
+// num quadro: quem lê o endereço de verdade é google.script.url.
+function lerParametrosEndereco(receber) {
+  let respondeu = false;
+  function responder(parametros) {
+    if (respondeu) return;
+    respondeu = true;
+    receber(parametros || {});
+  }
+
+  try {
+    if (window.google && google.script && google.script.url) {
+      google.script.url.getLocation(function(local) { responder(local && local.parameter); });
+      setTimeout(function() { responder({}); }, 4000);
+      return;
+    }
+  } catch (erro) { /* segue sem parâmetros */ }
+
+  responder({});
+}
+
+// Tira o ?convite= do endereço, para não reabrir o convite ao atualizar a página
+function limparEndereco() {
+  try {
+    if (window.google && google.script && google.script.history) google.script.history.replace(null, {}, '');
+  } catch (erro) { /* sem problema */ }
+}
+
+// ---------- PRIMEIRO ACESSO (convite) ----------
+let codigoConvite = '';
+
+function abrirTelaConvite(codigo) {
+  codigoConvite = codigo;
+  $('telaCarregando').hidden = true;
+  $('app').hidden = true;
+  $('telaLogin').hidden = true;
+  $('telaConvite').hidden = false;
+  $('conviteCarregando').hidden = false;
+  $('conviteInvalido').hidden = true;
+  $('formConvite').hidden = true;
+  document.title = 'Primeiro acesso · Tempero de Mãe';
+
+  api('abrirConvite', codigo)
+    .then(function(convite) {
+      $('conviteCarregando').hidden = true;
+      $('formConvite').hidden = false;
+      $('conviteTitulo').textContent = convite.nova_senha ? 'Crie uma nova senha' : 'Crie sua senha';
+      if (convite.administrador) {
+        $('conviteTexto').textContent = convite.nova_senha
+          ? 'Escolha a nova senha de acesso ao painel do restaurante.'
+          : 'Bem-vindo(a), ' + primeiroNome(convite.responsavel) + '! Crie a sua senha para acessar o painel do restaurante.';
+      } else {
+        $('conviteTexto').textContent = convite.nova_senha
+          ? 'Escolha a nova senha de acesso da ' + convite.nome_empresa + '.'
+          : 'Bem-vindo(a), ' + primeiroNome(convite.responsavel || convite.nome_empresa) + '! Para começar a fazer os pedidos da ' +
+            convite.nome_empresa + ', crie a sua senha.';
+      }
+      $('conviteUsuario').textContent = convite.usuario;
+      $('conviteSenha').focus();
+    })
+    .catch(function(erro) {
+      $('conviteCarregando').hidden = true;
+      $('conviteInvalido').hidden = false;
+      $('conviteInvalidoTexto').textContent = erro.message;
+    });
+}
+
+$('conviteIrLogin').addEventListener('click', function() {
+  limparEndereco();
+  $('telaConvite').hidden = true;
+  iniciarSessao();
+});
+
+$('formConvite').addEventListener('submit', function(evento) {
+  evento.preventDefault();
+
+  const botao = this.querySelector('button[type=submit]');
+  const erro = $('erroConvite');
+  const senha = $('conviteSenha').value;
+  erro.hidden = true;
+
+  function falhar(texto) {
+    erro.textContent = texto;
+    erro.hidden = false;
+  }
+
+  if (senha.length < TAMANHO_MINIMO_SENHA) return falhar('A senha precisa ter pelo menos ' + TAMANHO_MINIMO_SENHA + ' caracteres.');
+  if (senha !== $('conviteConfirmacao').value) return falhar('As duas senhas não são iguais.');
+
+  const lembrar = $('conviteLembrar').checked;
+  guardarPermanente('lembrar_login', lembrar ? 'sim' : 'nao');
+
+  comCarregamento(botao, api('concluirConvite', codigoConvite, senha, lembrar))
+    .then(function(resposta) {
+      $('conviteSenha').value = '';
+      $('conviteConfirmacao').value = '';
+      codigoConvite = '';
+      limparEndereco();
+
+      if (resposta.lembrete) guardarLoginSalvo(resposta.usuario.usuario_id, resposta.lembrete);
+      $('telaConvite').hidden = true;
+      entrar(resposta.token, resposta.usuario, resposta.dados_iniciais);
+      avisar('Senha criada! Daqui em diante, entre com o usuário ' + resposta.usuario.login + ' e essa senha.', 'sucesso');
+    })
+    .catch(function(falha) { falhar(falha.message); });
+});
+
+function iniciarSessao() {
+  const token = ler('sessao_token');
+
+  if (token) {
+    api('retomarSessao', token)
+      .then(function(resposta) { entrar(token, resposta.usuario, resposta.dados_iniciais); })
+      .catch(function() {
+        apagar('sessao_token');
+        entrarComLoginSalvo();
+      });
+    return;
+  }
+
+  entrarComLoginSalvo();
+}
+
+function entrarComLoginSalvo() {
+  const loginSalvo = loginSalvoAoAbrir();
+
+  if (!loginSalvo) {
+    mostrarLogin();
+    return;
+  }
+
+  api('entrarComLoginSalvo', loginSalvo)
+    .then(function(resposta) {
+      guardarLoginSalvo(resposta.usuario.usuario_id, loginSalvo);
+      entrar(resposta.token, resposta.usuario, resposta.dados_iniciais);
+    })
+    .catch(function(erro) {
+      const logins = lerLoginsSalvos();
+      Object.keys(logins).forEach(function(id) { if (logins[id] === loginSalvo) apagarLoginSalvo(id); });
+      apagarPermanente('login_salvo');
+      mostrarLogin();
+      if (/inativo/.test(erro.message)) {
+        $('erroLogin').textContent = erro.message;
+        $('erroLogin').hidden = false;
+      }
+    });
+}
+
+document.addEventListener('DOMContentLoaded', iniciar);
+</script>
