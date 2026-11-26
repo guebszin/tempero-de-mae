@@ -179,6 +179,7 @@ function verComoEmpresa(token, empresaId) {
     nome_empresa: empresa.nome_empresa,
     proprietario: false,
     modo_teste: true,
+    dia: sessao.dia || hojeTexto_(Session.getScriptTimeZone()),
     simulacao: { token_restaurante: token, proprietario_id: sessao.usuario_id }
   };
 

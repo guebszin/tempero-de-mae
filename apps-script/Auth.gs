@@ -289,7 +289,8 @@ function abrirSessao_(usuario, empresa) {
     login: usuario.login || '',
     perfil: usuario.perfil,
     nome_empresa: empresa ? empresa.nome_empresa : '',
-    proprietario: usuario.perfil === 'admin' && ehProprietario_(usuario.email)
+    proprietario: usuario.perfil === 'admin' && ehProprietario_(usuario.email),
+    dia: hojeTexto_(Session.getScriptTimeZone())   // a sessão vale só neste dia
   };
 
   const token = Utilities.getUuid() + Utilities.getUuid();
@@ -322,12 +323,18 @@ function comRecursos_(sessao) {
 // O aparelho guarda um código aleatório. Aqui fica só o "resumo"
 // (hash) desse código, nas Propriedades do script — nunca o código.
 // O login salvo deixa de valer quando:
-// - passam 30 dias sem uso;
+// - o dia termina (meia-noite, horário do script): no dia seguinte
+//   é preciso digitar a senha de novo;
 // - a senha do usuário é trocada ou redefinida;
 // - o usuário ou a empresa são inativados;
 // - a pessoa clica em "Sair".
 // ================================================================
 const MAXIMO_APARELHOS_POR_USUARIO = 10;
+
+// Meia-noite de hoje (fim do dia), em milissegundos
+function fimDoDiaMs_() {
+  return converterDataFormulario(hojeTexto_(Session.getScriptTimeZone(), 1)).getTime();
+}
 
 function resumoTexto_(texto) {
   return Utilities.base64EncodeWebSafe(
@@ -374,7 +381,7 @@ function criarLoginSalvo_(usuario) {
   propriedades.setProperty(chaveLoginSalvo_(lembrete), JSON.stringify({
     usuario_id: usuario.usuario_id,
     assinatura: assinaturaSenha_(usuario.senha_hash),
-    expira: agora + CONFIG.DIAS_LOGIN_SALVO * 86400000,
+    expira: fimDoDiaMs_(),
     usado: agora
   }));
 
@@ -397,7 +404,8 @@ function entrarComLoginSalvo(lembrete, semDados, usuarioEsperado) {
 
   const agora = new Date().getTime();
 
-  if (!dados || dados.expira < agora) {
+  // Vencido, ou salvo com a regra antiga de 30 dias (vai além de hoje)
+  if (!dados || dados.expira < agora || dados.expira > fimDoDiaMs_()) {
     propriedades.deleteProperty(chave);
     throw new Error(invalido);
   }
@@ -424,10 +432,10 @@ function entrarComLoginSalvo(lembrete, semDados, usuarioEsperado) {
     }
   }
 
-  // Cada uso renova os 30 dias (gravado no máximo uma vez por hora)
+  // Último uso (para manter os aparelhos mais usados); a validade não
+  // muda: termina à meia-noite do dia em que a senha foi digitada
   if (agora - (dados.usado || 0) > 3600000) {
     dados.usado = agora;
-    dados.expira = agora + CONFIG.DIAS_LOGIN_SALVO * 86400000;
     propriedades.setProperty(chave, JSON.stringify(dados));
   }
 
@@ -453,6 +461,12 @@ function validarSessao(token) {
   }
 
   const sessao = JSON.parse(dados);
+
+  // Entradas valem só no dia em que foram feitas
+  if (sessao.dia && sessao.dia !== hojeTexto_(Session.getScriptTimeZone())) {
+    CacheService.getScriptCache().remove(chaveSessao_(token));
+    throw new Error('Sessão expirada. Começou um novo dia: entre novamente.');
+  }
 
   // Sessão do modo teste: só o proprietário (conferido na planilha real);
   // a partir daqui esta execução usa a planilha de teste.

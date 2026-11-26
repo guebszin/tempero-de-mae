@@ -9,8 +9,9 @@ const CONFIG = {
   DURACAO_SESSAO_SEGUNDOS: 21600,   // 6 horas (máximo permitido pelo Google)
   MAX_TENTATIVAS_LOGIN: 5,          // tentativas erradas antes de bloquear
   BLOQUEIO_LOGIN_SEGUNDOS: 900,     // 15 minutos de bloqueio
-  TAMANHO_MINIMO_SENHA: 6,
-  DIAS_LOGIN_SALVO: 30              // "Manter conectado": dias sem precisar digitar a senha
+  TAMANHO_MINIMO_SENHA: 6
+  // Entradas valem só no dia em que foram feitas: à meia-noite todos
+  // precisam entrar de novo ("Manter conectado até o fim do dia", Auth.gs)
 };
 
 const ESTRUTURA = {

@@ -184,6 +184,9 @@ async def main():
 
         # ================= 3. RELATÓRIO FINANCEIRO =================
         await pg.evaluate(relogio(dia(6)+datetime.timedelta(days=1),15))
+        # Virou o dia: a entrada do dia anterior não vale mais (v27)
+        await pg.reload(); await pg.wait_for_selector('#telaLogin:not([hidden])', timeout=20000)
+        await entrar(pg,'admin@rest.com','senhaadmin12345')
         ids=await pg.evaluate(chamar(ADM+"return Object.fromEntries(w.listarEmpresas(tk).map(e=>[e.nome_empresa,e.empresa_id]));"))
         cob=await pg.evaluate(chamar(ADM+"""const c=w.gerarCobranca(tk,{empresa_id:%s,inicio:%s,fim:%s,vencimento:%s,desconto_tipo:'PERCENTUAL',desconto_valor:'10',desconto_motivo:'Cliente fiel'}); return c;"""%(
             json.dumps(ids['Alfa']),json.dumps(dia(0).isoformat()),json.dumps(dia(6).isoformat()),json.dumps((dia(6)+datetime.timedelta(days=10)).isoformat()))))
