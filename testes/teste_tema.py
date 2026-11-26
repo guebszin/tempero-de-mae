@@ -19,7 +19,7 @@ async def main():
         await pg.goto('http://localhost:8765/index.html'); await pg.evaluate("localStorage.clear(); sessionStorage.clear()")
         await pg.goto('http://localhost:8765/index.html'); await pg.wait_for_selector('#telaLogin:not([hidden])')
         ok(await pg.evaluate(TEMA)=='escuro', 'automático segue aparelho escuro')
-        ok(await pg.evaluate(FUNDO)=='rgb(20, 16, 11)', 'fundo escuro (marrom, v30): '+await pg.evaluate(FUNDO))
+        ok(await pg.evaluate(FUNDO)=='rgb(15, 19, 32)', 'fundo escuro (azul-noite, v31): '+await pg.evaluate(FUNDO))
         ok(await pg.locator('#telaLogin .seletor-tema button.ativo[data-tema=auto]').count()==1, 'login mostra Auto marcado')
         await pg.screenshot(path='v15/t1_login_escuro.png')
         await pg.click('#telaLogin .seletor-tema button[data-tema=claro]')
