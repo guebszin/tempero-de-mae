@@ -27,7 +27,10 @@ idx=idx.replace('<body>','<body>'+shim,1)
 idx=idx.replace("document.addEventListener('DOMContentLoaded', iniciar);","window.addEventListener('load', iniciar);")
 open('index.html','w',encoding='utf-8').write(idx)
 COMPAT=open('compat.js').read() if os.environ.get('SEM_COMPAT')!='1' else ''
-gs=''.join(ler(n)+'\n' for n in ['Config.gs','Auth.gs','Empresas.gs','Precos.gs','Funcionarios.gs','Painel.gs','Cardapios.gs','Pedidos.gs','Relatorios.gs','Cobrancas.gs','Sistema.gs']+[n for n in ['Limpeza.gs','Permissoes.gs','Dashboard.gs','ModoTeste.gs'] if os.path.exists(os.path.join(v3,n))])
+# Todos os .gs da pasta (Config primeiro; os demais em ordem alfabética)
+arquivos_gs=sorted(n for n in os.listdir(v3) if n.endswith('.gs'))
+arquivos_gs.sort(key=lambda n: (n!='Config.gs', n))
+gs=''.join(ler(n)+'\n' for n in arquivos_gs)
 srv="<html><body><script src='mock_gas.js'></script><script>\n"+gs+"\n"+COMPAT+"\nwindow.__novaExecucao=function(){try{__carregarAbas();memoriaExecucao_={};versaoDadosAtual_=null;planilhaAberta_=null;emGravacao_=false;try{bancoTesteAtivo_=false;}catch(e){}}catch(e){}};\nif(!__carregarAbas()){__criarAbas(ESTRUTURA); criarPrimeiroAdministrador('Maria Souza','admin@rest.com','senhaadmin12345');}\n</script></body></html>"
 open('servidor.html','w',encoding='utf-8').write(srv)
 print('ok')

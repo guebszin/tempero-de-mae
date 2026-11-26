@@ -95,6 +95,7 @@ AO_SAIR.push(function() {
   aoVivo.versao = null;
   aoVivo.pedidos = null;
   aoVivo.pedidoEmpresa = null;
+  aoVivo.prazos = null;
   aoVivo.ocupado = false;
 });
 
@@ -204,6 +205,9 @@ function renderizarPedidoEmpresa() {
 
   conteudo.appendChild(criarCabecalhoPedidoEmpresa());
 
+  // Passou do horário: pode pedir mais prazo ao restaurante
+  if (podePedirPrazoExtra()) conteudo.appendChild(criarCartaoPrazoExtra());
+
   // Sem cardápio ou sem preço: não dá para pedir
   if (!e.cardapio) {
     conteudo.appendChild(estadoVazio({
@@ -259,7 +263,10 @@ function criarCabecalhoPedidoEmpresa() {
   textos.appendChild(el('h2', '', 'Pedido de ' + nomeDoDiaCompleto(e.prazo.hoje).toLowerCase()));
 
   const prazo = el('p', 'subtitulo-cartao');
-  if (e.prazo.aberto) {
+  if (e.prazo.aberto && e.prazo.prazo_extra) {
+    prazo.textContent = 'Prazo extra liberado pelo restaurante: você pode enviar ou alterar até ' + e.prazo.limite + ' (' +
+      tempoRestante(e.prazo, pedidoEmpresa.recebidoEm) + ').';
+  } else if (e.prazo.aberto) {
     prazo.textContent = 'Você pode enviar ou alterar até ' + e.prazo.limite + ' (' +
       tempoRestante(e.prazo, pedidoEmpresa.recebidoEm) + ').';
   } else {
@@ -286,6 +293,64 @@ function criarCabecalhoPedidoEmpresa() {
     cartao.appendChild(criarAlerta('Pedido confirmado pelo restaurante às ' + horaDe(e.pedido.confirmado_em) + '.', { tipo: 'ok', icone: 'check' }));
   }
 
+  return cartao;
+}
+
+// ---------- PRAZO EXTRA (empresa) ----------
+// Passou do horário limite, há cardápio e preço: dá para pedir mais prazo
+function podePedirPrazoExtra() {
+  const e = pedidoEmpresa.estado;
+  return !!(e && !e.prazo.aberto && e.prazo.encerrado_por_horario && e.cardapio && e.tem_preco && e.prazo_extra);
+}
+
+function criarCartaoPrazoExtra() {
+  const e = pedidoEmpresa.estado;
+  const situacao = e.prazo_extra;
+  const minutos = e.minutos_prazo_extra || 30;
+  const cartao = el('div', 'cartao cartao-prazo-extra');
+
+  if (situacao.status === 'PENDENTE') {
+    cartao.appendChild(criarAlerta('Você pediu mais prazo às ' + horaDe(situacao.solicitado_em) +
+      '. Aguardando o restaurante responder — avisaremos aqui.', { tipo: 'info', icone: 'alerta' }));
+    return cartao;
+  }
+
+  if (situacao.status === 'RECUSADO') {
+    cartao.appendChild(criarAlerta('O restaurante não liberou mais prazo' +
+      (situacao.resposta ? ': ' + situacao.resposta.replace(/[.!?]*$/, '.') : '.'), { icone: 'alerta' }));
+  } else if (situacao.status === 'ENCERRADO') {
+    cartao.appendChild(criarAlerta('O prazo extra liberado pelo restaurante terminou às ' + situacao.liberado_ate_texto + '.', { tipo: 'info', icone: 'alerta' }));
+  }
+
+  if (!situacao.pode_pedir) return cartao;
+
+  cartao.appendChild(el('h3', 'titulo-secao', 'Precisa fazer ou mudar o pedido?'));
+  cartao.appendChild(el('p', 'texto-apoio',
+    'O horário de hoje acabou às ' + e.prazo.limite_normal + '. Peça ao restaurante mais ' + minutos +
+    ' minutos. Se ele liberar, você terá ' + minutos + ' minutos para enviar ou alterar o pedido (vale só para hoje).'));
+
+  const linha = el('div', 'prazo-extra-linha');
+  const campo = el('input');
+  campo.type = 'text';
+  campo.maxLength = 200;
+  campo.placeholder = 'Mensagem para o restaurante (opcional)';
+  campo.id = 'mensagemPrazoExtra';
+  linha.appendChild(campo);
+
+  const botao = criarBotao('Pedir mais ' + minutos + ' minutos', {
+    classe: 'botao-primario', icone: 'alerta',
+    aoClicar: function() {
+      comCarregamento(botao, apiSessao('solicitarPrazoExtra', campo.value))
+        .then(function(resposta) {
+          aplicarEstadoPedidoEmpresa(resposta.estado);
+          renderizarPedidoEmpresa();
+          avisar(resposta.mensagem);
+        })
+        .catch(function(erro) { avisar(erro.message, 'erro'); });
+    }
+  });
+  linha.appendChild(botao);
+  cartao.appendChild(linha);
   return cartao;
 }
 
@@ -879,7 +944,7 @@ function renderizarPedidoHojeEmpresa(resumo) {
   if (!resumo) return;
 
   $('subtituloPedidoHojeEmpresa').textContent = resumo.prazo.aberto
-    ? 'Envie ou altere até ' + resumo.prazo.limite + '.'
+    ? (resumo.prazo.prazo_extra ? 'Prazo extra: envie ou altere até ' : 'Envie ou altere até ') + resumo.prazo.limite + '.'
     : resumo.prazo.motivo;
 
   if (resumo.status) {
@@ -895,6 +960,19 @@ function renderizarPedidoHojeEmpresa(resumo) {
     caixa.appendChild(criarAlerta('Você ainda não fez o pedido de hoje.', { tipo: 'info', icone: 'pedido' }));
   } else if (!resumo.cardapio_publicado && resumo.prazo.aberto) {
     caixa.appendChild(criarAlerta('O cardápio de hoje ainda não foi publicado.', { tipo: 'info', icone: 'cardapio' }));
+  }
+
+  // Passou do horário: pedir mais prazo (ou aguardar a resposta)
+  const extra = resumo.prazo_extra;
+  if (!resumo.prazo.aberto && resumo.prazo.encerrado_por_horario && resumo.cardapio_publicado && extra) {
+    if (extra.status === 'PENDENTE') {
+      caixa.appendChild(criarAlerta('Você pediu mais prazo. Aguardando o restaurante responder.', { tipo: 'info', icone: 'alerta' }));
+    } else if (extra.pode_pedir) {
+      caixa.appendChild(criarBotao('Pedir mais prazo ao restaurante', {
+        classe: 'botao-secundario botao-largo', icone: 'alerta',
+        aoClicar: function() { irPara('pedidos-empresa'); }
+      }));
+    }
   }
 
   if (resumo.prazo.aberto && resumo.cardapio_publicado) {
@@ -1045,6 +1123,9 @@ function renderizarPedidosDia(dia) {
 
   conteudo.innerHTML = '';
 
+  // Pedidos de prazo extra das empresas
+  if (dia.prazos_extras && dia.prazos_extras.length) conteudo.appendChild(criarPainelPrazosExtras(dia));
+
   // Indicadores
   const indicadores = el('div', 'grade-indicadores');
   indicadores.appendChild(criarIndicador({
@@ -1093,6 +1174,96 @@ function renderizarPedidosDia(dia) {
   // Produção
   grade.appendChild(criarCartaoProducao(dia));
   conteudo.appendChild(grade);
+}
+
+// ---------- PRAZO EXTRA (restaurante) ----------
+function criarPainelPrazosExtras(dia) {
+  const minutos = dia.minutos_prazo_extra || 30;
+  const pendentes = dia.prazos_extras.filter(function(s) { return s.status === 'PENDENTE'; });
+  const respondidos = dia.prazos_extras.filter(function(s) { return s.status !== 'PENDENTE'; });
+  const caixa = el('div', 'painel-prazos-extras');
+
+  pendentes.forEach(function(s) {
+    const cartao = el('div', 'cartao prazo-extra-pedido');
+    const textos = el('div', 'prazo-extra-textos');
+    textos.appendChild(el('strong', '', s.nome + ' pediu mais ' + minutos + ' minutos'));
+    textos.appendChild(el('span', '', 'Às ' + horaDe(s.solicitado_em) + ' · o horário de pedidos já tinha acabado'));
+    if (s.mensagem) textos.appendChild(el('q', 'prazo-extra-mensagem', s.mensagem));
+    cartao.appendChild(textos);
+
+    const acoes = el('div', 'prazo-extra-acoes');
+    const liberar = criarBotao('Liberar ' + minutos + ' min', {
+      classe: 'botao-primario', icone: 'check',
+      aoClicar: function() { responderPrazo(s, true, '', liberar); }
+    });
+    const recusar = criarBotao('Recusar', {
+      classe: 'botao-secundario',
+      aoClicar: function() { recusarPrazo(s); }
+    });
+    acoes.appendChild(liberar);
+    acoes.appendChild(recusar);
+    cartao.appendChild(acoes);
+    caixa.appendChild(cartao);
+  });
+
+  if (respondidos.length) {
+    const lista = el('div', 'prazo-extra-historico');
+    respondidos.forEach(function(s) {
+      const texto = s.status === 'LIBERADO'
+        ? s.nome + ': prazo extra até ' + s.liberado_ate_texto
+        : s.status === 'ENCERRADO'
+          ? s.nome + ': prazo extra terminou às ' + s.liberado_ate_texto
+          : s.nome + ': pedido de prazo recusado' + (s.resposta ? ' (' + s.resposta + ')' : '');
+      lista.appendChild(el('span', 'prazo-extra-item ' + s.status.toLowerCase(), texto));
+    });
+    caixa.appendChild(lista);
+  }
+
+  return caixa;
+}
+
+function responderPrazo(solicitacao, liberar, resposta, botao) {
+  const tarefa = apiSessao('responderPrazoExtra', solicitacao.solicitacao_id, liberar, resposta || '');
+  (botao ? comCarregamento(botao, tarefa) : tarefa)
+    .then(function(r) {
+      aplicarDiaAtualizado(r.dia);
+      avisar(r.mensagem);
+    })
+    .catch(function(erro) { avisar(erro.message, 'erro'); });
+}
+
+function recusarPrazo(solicitacao) {
+  const form = el('form');
+  form.noValidate = true;
+  form.appendChild(el('p', 'texto-apoio', solicitacao.nome + ' não poderá pedir nem alterar o pedido de hoje.'));
+  const bloco = el('div', 'campo');
+  bloco.appendChild(el('label', '', 'Motivo (a empresa vê)'));
+  const campo = el('input');
+  campo.maxLength = 200;
+  campo.placeholder = 'Opcional. Ex.: a produção já foi fechada';
+  bloco.appendChild(campo);
+  form.appendChild(bloco);
+
+  const rodape = el('div', 'modal-rodape');
+  rodape.appendChild(criarBotao('Voltar', { classe: 'botao-secundario', aoClicar: fecharModal }));
+  const enviar = criarBotao('Recusar', { classe: 'botao-perigo' });
+  enviar.type = 'submit';
+  rodape.appendChild(enviar);
+  form.appendChild(rodape);
+
+  form.addEventListener('submit', function(evento) {
+    evento.preventDefault();
+    comCarregamento(enviar, apiSessao('responderPrazoExtra', solicitacao.solicitacao_id, false, campo.value))
+      .then(function(r) {
+        fecharModal();
+        aplicarDiaAtualizado(r.dia);
+        avisar(r.mensagem);
+      })
+      .catch(function(erro) { avisar(erro.message, 'erro'); });
+  });
+
+  abrirModal('Recusar mais prazo', form, { pequeno: true });
+  setTimeout(function() { campo.focus(); }, 50);
 }
 
 function pedidoAtivo(pedido) {
@@ -1431,8 +1602,12 @@ function renderizarPedidosHojeAdmin(resumo) {
     caixa.appendChild(criarAlerta(resumo.pendentes + ' pedido(s) aguardando sua confirmação.', { icone: 'pedido' }));
   }
 
+  (resumo.prazos_pendentes || []).forEach(function(s) {
+    caixa.appendChild(criarAlerta(s.nome + ' pediu mais tempo para fazer o pedido.', { icone: 'alerta' }));
+  });
+
   caixa.appendChild(criarBotao('Abrir pedidos de hoje', {
-    classe: resumo.pendentes ? 'botao-primario botao-largo' : 'botao-secundario botao-largo',
+    classe: resumo.pendentes || (resumo.prazos_pendentes || []).length ? 'botao-primario botao-largo' : 'botao-secundario botao-largo',
     icone: 'pedido',
     aoClicar: function() { irPara('pedidos', { data: resumo.data }); }
   }));
@@ -2030,6 +2205,7 @@ const aoVivo = {
   versao: null,
   pedidos: null,          // restaurante: { pedido_id: situação anterior }
   pedidoEmpresa: null,    // empresa: resumo anterior do pedido de hoje
+  prazos: null,           // restaurante: pedidos de prazo extra já avisados
   temporizador: null,
   ocupado: false,
   ultimaVerificacao: 0,
@@ -2113,7 +2289,17 @@ function receberNovidadesRestaurante(resposta, primeira) {
   });
 
   aoVivo.pedidos = atuais;
-  atualizarPendencias(resposta.resumo.pendentes);
+
+  // Pedidos de prazo extra novos
+  const prazosAntes = aoVivo.prazos || {};
+  const prazosAgora = {};
+  (resposta.resumo.prazos_pendentes || []).forEach(function(s) {
+    prazosAgora[s.solicitacao_id] = true;
+    if (!primeira && !prazosAntes[s.solicitacao_id]) avisos.push(s.nome + ' pediu mais tempo para fazer o pedido');
+  });
+  aoVivo.prazos = prazosAgora;
+
+  atualizarPendencias(resposta.resumo.pendentes + (resposta.resumo.prazos_pendentes || []).length);
 
   if (avisos.length) {
     avisos.slice(0, 3).forEach(function(texto) { avisar(texto); });
@@ -2216,8 +2402,17 @@ function receberNovidadesEmpresa(resposta, primeira) {
 
   if (primeira || !antes) return;
 
-  const chave = function(r) { return [r.pedido_id, r.status, r.quantidade, r.atualizado_em, r.confirmado_em].join('|'); };
+  const situacaoPrazo = function(r) { return r.prazo_extra ? r.prazo_extra.status + ':' + (r.prazo_extra.liberado_ate || '') : ''; };
+  const chave = function(r) { return [r.pedido_id, r.status, r.quantidade, r.atualizado_em, r.confirmado_em, situacaoPrazo(r)].join('|'); };
   if (chave(antes) === chave(atual)) return;
+
+  if (situacaoPrazo(atual) !== situacaoPrazo(antes) && atual.prazo_extra) {
+    if (atual.prazo_extra.status === 'LIBERADO') {
+      avisar('O restaurante liberou mais prazo: você pode enviar ou alterar o pedido até ' + atual.prazo_extra.liberado_ate_texto + '.');
+    } else if (atual.prazo_extra.status === 'RECUSADO') {
+      avisar('O restaurante não liberou mais prazo' + (atual.prazo_extra.resposta ? ': ' + atual.prazo_extra.resposta : '.'), 'erro');
+    }
+  }
 
   if (atual.status !== antes.status || atual.confirmado_em !== antes.confirmado_em) {
     if (atual.status === 'CONFIRMADO') {

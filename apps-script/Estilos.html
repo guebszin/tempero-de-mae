@@ -1054,6 +1054,7 @@
   .indicador-icone svg { width: 22px; height: 22px; }
   .indicador-icone.azul { background: var(--azul-claro); color: var(--azul); }
   .indicador-icone.amarelo { background: var(--amarelo-claro); color: var(--amarelo); }
+  .indicador-icone.vermelho { background: var(--vermelho-claro); color: var(--vermelho); }
 
   .indicador-rotulo { font-size: 13px; color: var(--texto-suave); }
 
@@ -1593,7 +1594,91 @@
   .dia-cabecalho strong { display: block; font-size: 15px; color: var(--verde); }
   .dia-cabecalho span { display: block; font-size: 12px; color: var(--texto-fraco); }
 
-  .dia-acoes { display: flex; gap: 2px; }
+  .dia-acoes { display: flex; gap: 2px; align-items: center; }
+
+  /* Chave Aberto / Fechado do dia */
+  .chave-dia {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 10px 0 4px;
+    margin-right: 4px;
+    border: 1px solid var(--borda);
+    border-radius: 999px;
+    background: var(--fundo);
+    color: var(--texto-suave);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .chave-dia-bolinha {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--texto-fraco);
+    transition: background .15s;
+  }
+  .chave-dia.ligada { background: var(--verde-claro); border-color: transparent; color: var(--verde-escuro); }
+  .chave-dia.ligada .chave-dia-bolinha { background: var(--verde); }
+  .chave-dia:focus-visible { outline: 2px solid var(--verde); outline-offset: 2px; }
+
+  /* Dia fechado (feriado, folga) */
+  .dia-cardapio.fechado { background: var(--fundo); box-shadow: none; border-style: dashed; }
+  .dia-cardapio.fechado .dia-cabecalho strong { color: var(--texto-suave); }
+  .dia-fechado-aviso {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: var(--raio-pequeno);
+    background: var(--superficie);
+    border: 1px solid var(--borda);
+    color: var(--texto-suave);
+  }
+  .dia-fechado-aviso svg { width: 20px; height: 20px; flex-shrink: 0; }
+  .dia-fechado-aviso strong { display: block; color: var(--texto); font-size: 14px; }
+  .dia-fechado-aviso span { display: block; font-size: 13px; }
+  .dia-fechado-dica { font-size: 12px; color: var(--texto-fraco); margin: 10px 0; }
+
+  /* Prazo extra */
+  .cartao-prazo-extra { margin-bottom: 14px; }
+  .cartao-prazo-extra .alerta { margin-bottom: 10px; }
+  .cartao-prazo-extra .alerta:last-child { margin-bottom: 0; }
+  .prazo-extra-linha { display: flex; gap: 10px; flex-wrap: wrap; }
+  .tipos-relatorio { margin: 0 0 12px; }
+  .resumo-consumo-financeiro { margin-bottom: 6px; }
+  .resumo-consumo-financeiro .texto-apoio { margin: 0; }
+  .prazo-extra-linha input { flex: 1 1 240px; }
+  .painel-prazos-extras { display: grid; gap: 10px; margin-bottom: 16px; }
+  .prazo-extra-pedido {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+    border-left: 4px solid var(--amarelo);
+  }
+  .prazo-extra-textos { display: grid; gap: 2px; min-width: 0; }
+  .prazo-extra-textos strong { font-size: 15px; }
+  .prazo-extra-textos span { font-size: 13px; color: var(--texto-suave); }
+  .prazo-extra-mensagem { font-size: 14px; color: var(--texto); font-style: italic; }
+  .prazo-extra-acoes { display: flex; gap: 8px; flex-wrap: wrap; }
+  .prazo-extra-historico { display: flex; gap: 8px; flex-wrap: wrap; }
+  .prazo-extra-item {
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--fundo);
+    border: 1px solid var(--borda);
+    color: var(--texto-suave);
+  }
+  .prazo-extra-item.liberado { background: var(--verde-claro); border-color: transparent; color: var(--verde-escuro); }
+  @media (max-width: 520px) {
+    .prazo-extra-acoes, .prazo-extra-acoes .botao, .prazo-extra-linha .botao { width: 100%; justify-content: center; }
+  }
 
   .botao-icone.pequeno { width: 30px; height: 30px; }
   .botao-icone.pequeno svg { width: 16px; height: 16px; }

@@ -191,7 +191,8 @@ function instrucoesPagamento_() {
 // fecharam; senão, ontem (o pedido de hoje ainda pode mudar).
 function ultimoDiaCobravel_(fuso) {
   const hoje = hojeTexto_(fuso);
-  return prazoPedido_(hoje).aberto ? somarDiasTexto_(hoje, -1) : hoje;
+  // Prazo extra liberado para alguma empresa: o dia de hoje ainda pode mudar
+  return prazoPedido_(hoje).aberto || algumPrazoExtraAtivo_(hoje) ? somarDiasTexto_(hoje, -1) : hoje;
 }
 
 function ultimoDiaDoMesTexto_(texto) {
@@ -473,8 +474,9 @@ function conferirPeriodoCobranca_(dados) {
 
   if (fim > hoje) throw new Error('A cobrança só pode ir até hoje. Dias futuros ainda não têm pedidos fechados.');
 
-  if (fim === hoje && prazoPedido_(hoje).aberto) {
-    throw new Error('Os pedidos de hoje ainda podem ser alterados até ' + horarioLimite_() +
+  const prazoHoje = prazoPedido_(hoje, empresaId);
+  if (fim === hoje && prazoHoje.aberto) {
+    throw new Error('Os pedidos de hoje ainda podem ser alterados até ' + prazoHoje.limite +
       '. Termine o período ontem ou gere a cobrança depois desse horário.');
   }
 

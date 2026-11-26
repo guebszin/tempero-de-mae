@@ -58,7 +58,7 @@ Funcionários das empresas (sem login próprio).
 
 ## CARDAPIOS
 
-Um cardápio por dia. Listas (proteínas, saladas…) ficam uma por linha dentro da célula.
+Um cardápio por dia (segunda a domingo). Listas (proteínas, saladas…) ficam uma por linha dentro da célula. `fechado`: SIM = dia fechado (feriado, folga), NAO = aberto, vazio = padrão (sábado e domingo fechados, os outros dias abertos).
 
 | # | Coluna |
 |---|---|
@@ -72,6 +72,7 @@ Um cardápio por dia. Listas (proteínas, saladas…) ficam uma por linha dentro
 | 8 | `opcao_extra` |
 | 9 | `observacoes` |
 | 10 | `status` |
+| 11 | `fechado` |
 
 ## PEDIDOS
 
@@ -226,3 +227,21 @@ Cópia dos funcionários excluídos pelo proprietário.
 | 6 | `excluido_em` |
 | 7 | `excluido_por` |
 | 8 | `quentinhas` |
+
+## PRAZOS_EXTRAS
+
+Pedidos de prazo extra: depois do horário limite, a empresa pede mais tempo; se o restaurante liberar, ela tem 30 minutos (a partir da liberação) para enviar ou alterar o pedido daquele dia. `status`: PENDENTE, LIBERADO ou RECUSADO.
+
+| # | Coluna |
+|---|---|
+| 1 | `solicitacao_id` |
+| 2 | `empresa_id` |
+| 3 | `data` |
+| 4 | `solicitado_em` |
+| 5 | `solicitado_por` |
+| 6 | `mensagem` |
+| 7 | `status` |
+| 8 | `respondido_em` |
+| 9 | `respondido_por` |
+| 10 | `liberado_ate` |
+| 11 | `resposta` |

@@ -157,7 +157,12 @@ async def main():
         ok(await pg.locator('#menuLateral [data-tela=cobrancas]').count()==1, 'religado: Cobranças volta')
 
         # ---------- 7. MENSAGEM DO CONVITE PERSONALIZADA ----------
-        # Espera a tela de Configurações terminar de se redesenhar (depois de religar o módulo)
+        # Espera a tela de Configurações terminar de se redesenhar (depois de religar o módulo):
+        # força a atualização automática agora, para ela não redesenhar a tela no meio do teste
+        await pg.evaluate("""new Promise(function(fim){
+            (function esperar(){ if (aoVivo.ocupado) return setTimeout(esperar,100); verificarNovidades();
+              (function fimDaVerificacao(){ if (aoVivo.ocupado) return setTimeout(fimDaVerificacao,100); fim(); })(); })();
+          })""")
         await pg.evaluate("""new Promise(function(fim){
             let antes=null, iguais=0, voltas=0;
             const t=setInterval(function(){

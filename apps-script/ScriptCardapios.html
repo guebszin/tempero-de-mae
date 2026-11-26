@@ -38,8 +38,8 @@ function segundaDe(texto) {
 }
 
 function rotuloSemana(segunda) {
-  const sexta = somarDias(segunda, 4);
-  return formatarData(segunda).slice(0, 5) + ' a ' + formatarData(sexta);
+  const domingo = somarDias(segunda, 6);
+  return formatarData(segunda).slice(0, 5) + ' a ' + formatarData(domingo);
 }
 
 function rotuloRelativoSemana(segunda) {
@@ -78,6 +78,12 @@ function renderizarDiaLeitura(dia, opcoes) {
     cartao.appendChild(cabecalho);
   }
 
+  if (dia.fechado) {
+    cartao.classList.add('fechado');
+    cartao.appendChild(criarAvisoFechado(dia.observacoes));
+    return cartao;
+  }
+
   if (!diaTemItens(dia)) {
     cartao.appendChild(el('div', 'dia-vazio', dia.observacoes || 'Cardápio não publicado.'));
     return cartao;
@@ -110,6 +116,19 @@ function renderizarDiaLeitura(dia, opcoes) {
   if (dia.observacoes) cartao.appendChild(el('div', 'dia-observacao', dia.observacoes));
 
   return cartao;
+}
+
+// "Fechado" (feriado, folga): sem cardápio e sem pedidos neste dia
+function criarAvisoFechado(observacoes) {
+  const caixa = el('div', 'dia-fechado-aviso');
+  const desenho = el('span');
+  desenho.innerHTML = icone('calendario');
+  caixa.appendChild(desenho.firstChild);
+  const textos = el('div');
+  textos.appendChild(el('strong', '', 'Fechado'));
+  textos.appendChild(el('span', '', observacoes || 'Sem atendimento neste dia.'));
+  caixa.appendChild(textos);
+  return caixa;
 }
 
 // Cartão "Cardápio de hoje" na tela inicial da empresa
@@ -158,7 +177,7 @@ function criarNavegacaoSemana(segunda, aoMudar) {
   const textos = el('div', 'semana-textos');
   textos.appendChild(el('strong', '', rotuloSemana(segunda)));
   const relativo = rotuloRelativoSemana(segunda);
-  textos.appendChild(el('span', '', relativo || 'Segunda a sexta'));
+  textos.appendChild(el('span', '', relativo || 'Segunda a domingo'));
 
   nav.appendChild(anterior);
   nav.appendChild(textos);
@@ -546,7 +565,7 @@ function criarDiaEditavel(indice) {
   const dataObj = textoParaData(dia.data);
   const hoje = dia.data === hojeTexto();
 
-  const cartao = el('div', 'dia-cardapio' + (hoje ? ' hoje' : ''));
+  const cartao = el('div', 'dia-cardapio' + (hoje ? ' hoje' : '') + (dia.fechado ? ' fechado' : ''));
   cartao.dataset.indice = indice;
 
   // Cabeçalho
@@ -557,6 +576,27 @@ function criarDiaEditavel(indice) {
   cabecalho.appendChild(textos);
 
   const acoes = el('div', 'dia-acoes');
+
+  // Aberto / fechado (feriado, folga, fim de semana sem atendimento)
+  const chave = el('button', 'chave-dia' + (dia.fechado ? '' : ' ligada'));
+  chave.type = 'button';
+  chave.setAttribute('role', 'switch');
+  chave.setAttribute('aria-checked', dia.fechado ? 'false' : 'true');
+  chave.title = dia.fechado ? 'Abrir este dia' : 'Fechar este dia (feriado, folga)';
+  chave.appendChild(el('span', 'chave-dia-bolinha'));
+  chave.appendChild(el('span', 'chave-dia-texto', dia.fechado ? 'Fechado' : 'Aberto'));
+  chave.addEventListener('click', function() { alternarDiaFechado(indice, chave); });
+
+  if (dia.fechado) {
+    cabecalho.appendChild(chave);
+    cartao.appendChild(cabecalho);
+    cartao.appendChild(criarAvisoFechado(''));
+    cartao.appendChild(el('p', 'dia-fechado-dica', 'As empresas veem "fechado" e não conseguem pedir. Use a chave acima para abrir o dia.'));
+    cartao.appendChild(criarObservacaoDia(dia, 'Motivo (ex.: feriado de Corpus Christi)'));
+    return cartao;
+  }
+
+  acoes.appendChild(chave);
 
   if (indice > 0) {
     const copiar = el('button', 'botao-icone pequeno');
@@ -615,17 +655,60 @@ function criarDiaEditavel(indice) {
   cartao.appendChild(extra);
 
   // Observação
+  cartao.appendChild(criarObservacaoDia(dia, 'Observação para as empresas (opcional)'));
+
+  return cartao;
+}
+
+function criarObservacaoDia(dia, dica) {
   const observacao = el('input', 'campo-item observacao');
-  observacao.placeholder = 'Observação (ex.: feriado, sem atendimento)';
+  observacao.placeholder = dica;
   observacao.maxLength = 200;
   observacao.value = dia.observacoes || '';
   observacao.addEventListener('input', function() {
     dia.observacoes = observacao.value;
     marcarAlterado();
   });
-  cartao.appendChild(observacao);
+  return observacao;
+}
 
-  return cartao;
+// ---------- ABRIR / FECHAR UM DIA ----------
+function alternarDiaFechado(indice, botao) {
+  const semana = cardapioAdmin.semana;
+  const dia = semana.dias[indice];
+  const nome = NOMES_DIAS_LONGOS[textoParaData(dia.data).getDay()];
+  const fechar = !dia.fechado;
+
+  const pergunta = fechar
+    ? confirmar({
+        titulo: 'Fechar ' + nome.toLowerCase() + ' (' + formatarData(dia.data).slice(0, 5) + ')?',
+        mensagem: 'As empresas verão "fechado" e não poderão pedir neste dia. O cardápio que já estiver montado fica guardado, caso você abra o dia de novo.',
+        textoBotao: 'Fechar o dia'
+      })
+    : Promise.resolve(true);
+
+  pergunta.then(function(sim) {
+    if (!sim) return;
+
+    const tarefa = aguardarSalvamento().then(function() {
+      if (cardapioAdmin.erro) throw new Error('Corrija o erro de salvamento antes de continuar.');
+      return apiSessao('definirDiaFechado', dia.data, fechar);
+    });
+
+    comCarregamento(botao, tarefa)
+      .then(function(resposta) {
+        cardapioAdmin.frequentes = resposta.semana.itens_frequentes || cardapioAdmin.frequentes;
+        delete resposta.semana.itens_frequentes;
+        aplicarOpcaoExtraPadrao(resposta.semana);
+        cardapioAdmin.semana = resposta.semana;
+        cardapioAdmin.semanas[resposta.semana.segunda] = { semana: resposta.semana, em: Date.now() };
+        if (typeof resumoAdmin !== 'undefined') resumoAdmin = null;
+        renderizarSemanaAdmin();
+        mostrarEstadoSalvamento('salvo');
+        avisar(resposta.mensagem);
+      })
+      .catch(function(erro) { avisar(erro.message, 'erro'); });
+  });
 }
 
 function criarGrupoEditavel(indice, grupo) {
@@ -830,8 +913,10 @@ function alternarPublicacao(botao) {
   const semana = cardapioAdmin.semana;
   const publicar = semana.status !== 'PUBLICADO';
 
+  const diasAbertos = semana.dias.filter(function(dia) { return !dia.fechado; });
+
   if (publicar) {
-    const comItens = semana.dias.filter(diaTemItens);
+    const comItens = diasAbertos.filter(diaTemItens);
 
     if (!comItens.length) {
       avisar('A semana está vazia. Monte o cardápio antes de publicar.', 'erro');
@@ -848,14 +933,14 @@ function alternarPublicacao(botao) {
     }
   }
 
-  const vazios = semana.dias.filter(function(dia) { return !diaTemItens(dia); });
+  const vazios = diasAbertos.filter(function(dia) { return !diaTemItens(dia); });
   const nomesVazios = vazios.map(function(dia) { return NOMES_DIAS_LONGOS[textoParaData(dia.data).getDay()]; });
 
   const pergunta = publicar
     ? confirmar({
         titulo: 'Publicar o cardápio?',
         mensagem: 'As empresas passarão a ver o cardápio de ' + rotuloSemana(semana.segunda) + '.' +
-          (vazios.length ? ' Atenção: ' + nomesVazios.join(', ') + (vazios.length > 1 ? ' estão sem cardápio.' : ' está sem cardápio.') : ''),
+          (vazios.length ? ' Atenção: ' + nomesVazios.join(', ') + (vazios.length > 1 ? ' estão abertos e sem cardápio' : ' está aberto e sem cardápio') + ' (se não houver atendimento, feche o dia).' : ''),
         textoBotao: 'Publicar'
       })
     : confirmar({

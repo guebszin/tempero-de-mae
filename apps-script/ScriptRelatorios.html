@@ -7,6 +7,8 @@
 // ================================================================
 
 const relatorio = {
+  tipo: 'consumo',        // consumo · financeiro (uma empresa)
+  financeiro: null,       // dados do relatório financeiro
   periodo: 'este-mes',
   inicio: null,
   fim: null,
@@ -37,13 +39,26 @@ const ABAS_RELATORIO = [
 TELAS['relatorios'] = {
   carregar: function() {
     montarFiltrosRelatorio();
-    if (relatorio.dados) {
-      renderizarRelatorio();
+    const dados = relatorio.tipo === 'financeiro' ? relatorio.financeiro : relatorio.dados;
+    if (dados) {
+      renderizarRelatorioAtual();
     } else {
       gerarRelatorioAgora();
     }
   }
 };
+
+function renderizarRelatorioAtual() {
+  if (relatorio.tipo === 'financeiro') renderizarRelatorioFinanceiro();
+  else renderizarRelatorio();
+}
+
+// Tipos de relatório (o financeiro precisa do módulo de cobranças)
+function tiposRelatorio() {
+  const tipos = [{ id: 'consumo', texto: 'Consumo' }];
+  if (recursoLigado('cobrancas')) tipos.push({ id: 'financeiro', texto: 'Financeiro por empresa' });
+  return tipos;
+}
 
 // Empresas excluídas (o histórico delas continua nos relatórios)
 let empresasExcluidas = [];
@@ -52,6 +67,8 @@ let empresasExcluidasCarregadas = false;
 AO_SAIR.push(function() {
   empresasExcluidas = [];
   empresasExcluidasCarregadas = false;
+  relatorio.tipo = 'consumo';
+  relatorio.financeiro = null;
   relatorio.periodo = 'este-mes';
   relatorio.inicio = null;
   relatorio.fim = null;
@@ -105,6 +122,32 @@ function montarFiltrosRelatorio() {
 
   const caixa = $('filtrosRelatorio');
   caixa.innerHTML = '';
+
+  // Consumo / Financeiro por empresa
+  const tipos = tiposRelatorio();
+  if (tipos.length > 1) {
+    const abasTipo = el('div', 'abas-relatorio tipos-relatorio');
+    abasTipo.setAttribute('role', 'tablist');
+    tipos.forEach(function(tipo) {
+      const ativa = tipo.id === relatorio.tipo;
+      const botao = el('button', 'aba-relatorio' + (ativa ? ' ativa' : ''), tipo.texto);
+      botao.type = 'button';
+      botao.setAttribute('role', 'tab');
+      botao.setAttribute('aria-selected', ativa ? 'true' : 'false');
+      botao.dataset.tipo = tipo.id;
+      botao.addEventListener('click', function() {
+        if (relatorio.tipo === tipo.id) return;
+        relatorio.tipo = tipo.id;
+        relatorio.montado = false;
+        montarFiltrosRelatorio();
+        gerarRelatorioAgora();
+      });
+      abasTipo.appendChild(botao);
+    });
+    caixa.appendChild(abasTipo);
+  } else {
+    relatorio.tipo = 'consumo';
+  }
 
   const linha = el('div', 'filtros-relatorio-linha');
 
@@ -181,9 +224,10 @@ function preencherEmpresasRelatorio() {
 
   function preencher() {
     const atual = relatorio.empresa;
+    const financeiro = relatorio.tipo === 'financeiro';
     seletor.innerHTML = '';
 
-    [{ valor: '', texto: 'Todas as empresas' }, { valor: 'CLIENTES', texto: 'Clientes sem cadastro' }]
+    (financeiro ? [] : [{ valor: '', texto: 'Todas as empresas' }, { valor: 'CLIENTES', texto: 'Clientes sem cadastro' }])
       .concat(empresas.slice()
         .sort(function(a, b) { return a.nome_empresa.localeCompare(b.nome_empresa, 'pt-BR'); })
         .map(function(e) { return { valor: e.empresa_id, texto: e.nome_empresa }; }))
@@ -197,7 +241,12 @@ function preencherEmpresasRelatorio() {
       });
 
     seletor.value = atual;
-    if (seletor.value !== atual) seletor.value = '';
+    if (seletor.selectedIndex < 0 || seletor.value !== atual) {
+      seletor.value = financeiro && seletor.options.length ? seletor.options[0].value : '';
+      relatorio.empresa = seletor.value;
+      // Financeiro sem empresa escolhida: gera assim que a lista chega
+      if (financeiro && !atual && seletor.value && estado.telaAtual === 'relatorios') gerarRelatorioAgora();
+    }
   }
 
   preencher();
@@ -229,6 +278,11 @@ function gerarRelatorioAgora() {
   relatorio.fim = fim;
   relatorio.empresa = $('relatorioEmpresa').value;
 
+  if (relatorio.tipo === 'financeiro') {
+    gerarRelatorioFinanceiroAgora();
+    return;
+  }
+
   const pedido = { inicio: inicio, fim: fim, empresa: relatorio.empresa };
   relatorio.ultimoPedido = pedido;
 
@@ -238,7 +292,7 @@ function gerarRelatorioAgora() {
     .then(function(dados) {
       if (relatorio.ultimoPedido !== pedido) return;   // já pediram outro
       relatorio.dados = dados;
-      if (estado.telaAtual === 'relatorios') renderizarRelatorio();
+      if (estado.telaAtual === 'relatorios' && relatorio.tipo === 'consumo') renderizarRelatorio();
     })
     .catch(function(erro) {
       if (relatorio.ultimoPedido !== pedido) return;
@@ -461,6 +515,372 @@ function renderizarAbaRelatorio() {
       ]
     });
     area.appendChild(lista);
+  }
+}
+
+// ================================================================
+// RELATÓRIO FINANCEIRO DE UMA EMPRESA
+// Consumo, cobranças, descontos (com os motivos), pagamentos e saldo.
+// ================================================================
+const SITUACOES_FINANCEIRO = {
+  PAGA: { texto: 'Paga', cor: 'verde' },
+  PARCIAL: { texto: 'Paga em parte', cor: 'amarela' },
+  ABERTA: { texto: 'A receber', cor: 'azul' },
+  VENCIDA: { texto: 'Vencida', cor: 'vermelha' }
+};
+
+function gerarRelatorioFinanceiroAgora() {
+  if (!relatorio.empresa) {
+    $('relatorioConteudo').innerHTML = '';
+    $('relatorioConteudo').appendChild(estadoVazio({
+      icone: 'empresa', titulo: 'Escolha uma empresa', texto: 'O relatório financeiro é feito para uma empresa de cada vez.'
+    }));
+    return;
+  }
+
+  const pedido = { inicio: relatorio.inicio, fim: relatorio.fim, empresa: relatorio.empresa, tipo: 'financeiro' };
+  relatorio.ultimoPedido = pedido;
+  mostrarCarregandoLista($('relatorioConteudo'), 4);
+
+  comCarregamento($('botaoGerarRelatorio'), apiSessao('gerarRelatorioFinanceiro', pedido))
+    .then(function(dados) {
+      if (relatorio.ultimoPedido !== pedido) return;
+      relatorio.financeiro = dados;
+      if (estado.telaAtual === 'relatorios' && relatorio.tipo === 'financeiro') renderizarRelatorioFinanceiro();
+    })
+    .catch(function(erro) {
+      if (relatorio.ultimoPedido !== pedido) return;
+      mostrarErroLista($('relatorioConteudo'), erro.message, gerarRelatorioAgora);
+    });
+}
+
+function porcentagemTexto(valor) {
+  return (Math.round(valor * 10) / 10).toLocaleString('pt-BR') + '%';
+}
+
+function renderizarRelatorioFinanceiro() {
+  const d = relatorio.financeiro;
+  const conteudo = $('relatorioConteudo');
+  conteudo.innerHTML = '';
+
+  const topo = el('div', 'relatorio-topo');
+  const textos = el('div');
+  textos.appendChild(el('h2', '', d.nome_empresa));
+  textos.appendChild(el('p', 'subtitulo-cartao', 'Relatório financeiro · ' + textoPeriodo(d.inicio, d.fim)));
+  topo.appendChild(textos);
+
+  const exportar = el('div', 'relatorio-exportar');
+  const vazio = !d.cobrancas.length && !d.consumo.pedidos;
+  const excel = criarBotao('Excel', {
+    classe: 'botao-secundario', icone: 'relatorio',
+    titulo: 'Baixar o relatório financeiro em planilha do Excel (.xlsx)',
+    aoClicar: function() { baixarFinanceiroExcel(d); }
+  });
+  const pdf = criarBotao('PDF / Imprimir', {
+    classe: 'botao-secundario', icone: 'imprimir',
+    titulo: 'Imprimir ou salvar como PDF',
+    aoClicar: function() { imprimirFinanceiro(d); }
+  });
+  excel.disabled = pdf.disabled = vazio;
+  exportar.appendChild(excel);
+  exportar.appendChild(pdf);
+  topo.appendChild(exportar);
+  conteudo.appendChild(topo);
+
+  if (vazio) {
+    conteudo.appendChild(estadoVazio({
+      icone: 'cobranca',
+      titulo: 'Nada neste período',
+      texto: 'Esta empresa não tem pedidos nem cobranças no período escolhido.'
+    }));
+    return;
+  }
+
+  const t = d.totais;
+  const indicadores = el('div', 'grade-indicadores quatro');
+  indicadores.appendChild(criarIndicador({
+    icone: 'cobranca', cor: 'azul', rotulo: 'Cobrado', valor: formatarMoeda(t.valor_liquido),
+    detalhe: t.cobrancas + (t.cobrancas === 1 ? ' cobrança' : ' cobranças') +
+      (t.descontos ? ' · ' + formatarMoeda(t.valor_bruto) + ' antes dos descontos' : '')
+  }));
+  indicadores.appendChild(criarIndicador({
+    icone: 'desconto', cor: 'amarelo', rotulo: 'Descontos', valor: formatarMoeda(t.descontos),
+    detalhe: t.cobrancas_com_desconto
+      ? 'em ' + t.cobrancas_com_desconto + (t.cobrancas_com_desconto === 1 ? ' cobrança' : ' cobranças') +
+        (t.valor_bruto ? ' · ' + porcentagemTexto(t.descontos / t.valor_bruto * 100) + ' do valor' : '')
+      : 'nenhum desconto no período'
+  }));
+  indicadores.appendChild(criarIndicador({
+    icone: 'check', rotulo: 'Recebido', valor: formatarMoeda(t.recebido),
+    detalhe: t.valor_liquido ? porcentagemTexto(t.recebido / t.valor_liquido * 100) + ' do cobrado' : '—'
+  }));
+  indicadores.appendChild(criarIndicador({
+    icone: 'alerta', cor: t.vencido ? 'vermelho' : '', rotulo: 'Falta receber', valor: formatarMoeda(t.saldo),
+    detalhe: t.vencido ? formatarMoeda(t.vencido) + ' vencido' : 'nada vencido'
+  }));
+  conteudo.appendChild(indicadores);
+
+  // Consumo do período
+  const c = d.consumo;
+  const consumo = el('div', 'cartao resumo-consumo-financeiro');
+  consumo.appendChild(el('h3', 'titulo-secao', 'Consumo no período'));
+  consumo.appendChild(el('p', 'texto-apoio',
+    c.quentinhas + (c.quentinhas === 1 ? ' quentinha' : ' quentinhas') + ' em ' + c.pedidos +
+    (c.pedidos === 1 ? ' pedido' : ' pedidos') + ' · ' + formatarMoeda(c.valor) +
+    (c.valor_nao_cobrado ? ' · ' + formatarMoeda(c.valor_nao_cobrado) + ' ainda não cobrado' : ' · tudo já cobrado')));
+  conteudo.appendChild(consumo);
+
+  // Cobranças
+  const secaoCobrancas = el('div');
+  secaoCobrancas.appendChild(el('h3', 'titulo-secao espaco-acima', 'Cobranças'));
+  const lista = el('div');
+  renderizarLista(lista, {
+    itens: d.cobrancas,
+    colunas: [
+      { titulo: 'Cobrança', valor: function(x) {
+        return textoDuplo('Nº ' + x.numero_texto, textoPeriodo(x.periodo_inicio, x.periodo_fim));
+      } },
+      { titulo: 'Vencimento', largura: '110px', valor: function(x) { return formatarData(x.data_vencimento); } },
+      { titulo: 'Valor', largura: '120px', valor: function(x) { return formatarMoeda(x.valor_bruto); } },
+      { titulo: 'Desconto', largura: '170px', valor: function(x) {
+        return x.desconto ? textoDuplo('− ' + formatarMoeda(x.desconto), x.motivo_desconto || 'Sem motivo informado') : '—';
+      } },
+      { titulo: 'Pago', largura: '120px', valor: function(x) { return formatarMoeda(x.valor_pago); } },
+      { titulo: 'Saldo', largura: '120px', valor: function(x) { return el('strong', '', formatarMoeda(x.saldo)); } },
+      { titulo: 'Situação', largura: '130px', valor: function(x) {
+        const s = SITUACOES_FINANCEIRO[x.situacao];
+        return criarEtiqueta(s.texto, s.cor);
+      } }
+    ],
+    vazio: { icone: 'cobranca', titulo: 'Nenhuma cobrança no período', texto: 'O consumo do período ainda não foi cobrado.' }
+  });
+  secaoCobrancas.appendChild(lista);
+  if (d.cobrancas.length) {
+    secaoCobrancas.appendChild(linhaTotal('Total', [
+      formatarMoeda(t.valor_bruto) + ' em cobranças',
+      '− ' + formatarMoeda(t.descontos) + ' de descontos',
+      formatarMoeda(t.recebido) + ' recebido',
+      formatarMoeda(t.saldo) + ' a receber'
+    ]));
+  }
+  conteudo.appendChild(secaoCobrancas);
+
+  // Descontos e motivos
+  const secaoDescontos = el('div');
+  secaoDescontos.appendChild(el('h3', 'titulo-secao espaco-acima', 'Descontos e motivos'));
+  if (!d.descontos.length) {
+    secaoDescontos.appendChild(el('p', 'texto-apoio', 'Nenhum desconto dado a esta empresa no período.'));
+  } else {
+    const listaDescontos = el('div');
+    renderizarLista(listaDescontos, {
+      itens: d.descontos,
+      colunas: [
+        { titulo: 'Cobrança', largura: '170px', valor: function(x) {
+          return textoDuplo('Nº ' + x.cobranca, textoPeriodo(x.periodo_inicio, x.periodo_fim));
+        } },
+        { titulo: 'Motivo', valor: function(x) { return x.motivo; } },
+        { titulo: 'Valor da cobrança', largura: '150px', valor: function(x) { return formatarMoeda(x.valor_bruto); } },
+        { titulo: 'Desconto', largura: '150px', valor: function(x) {
+          return el('strong', '', formatarMoeda(x.desconto) + ' (' + porcentagemTexto(x.percentual) + ')');
+        } }
+      ]
+    });
+    secaoDescontos.appendChild(listaDescontos);
+    secaoDescontos.appendChild(linhaTotal('Total de descontos', [
+      d.descontos.length + (d.descontos.length === 1 ? ' desconto' : ' descontos'), formatarMoeda(t.descontos)
+    ]));
+  }
+  conteudo.appendChild(secaoDescontos);
+
+  // Pagamentos
+  const secaoPagamentos = el('div');
+  secaoPagamentos.appendChild(el('h3', 'titulo-secao espaco-acima', 'Pagamentos recebidos'));
+  if (!d.pagamentos.length) {
+    secaoPagamentos.appendChild(el('p', 'texto-apoio', 'Nenhum pagamento registrado para estas cobranças.'));
+  } else {
+    const listaPagamentos = el('div');
+    renderizarLista(listaPagamentos, {
+      itens: d.pagamentos,
+      colunas: [
+        { titulo: 'Data', largura: '110px', valor: function(x) { return formatarData(x.data); } },
+        { titulo: 'Cobrança', largura: '110px', valor: function(x) { return 'Nº ' + x.cobranca; } },
+        { titulo: 'Forma', valor: function(x) { return textoDuplo(x.forma, x.observacoes); } },
+        { titulo: 'Valor', largura: '130px', valor: function(x) { return el('strong', '', formatarMoeda(x.valor)); } }
+      ]
+    });
+    secaoPagamentos.appendChild(listaPagamentos);
+    secaoPagamentos.appendChild(linhaTotal('Total recebido', [formatarMoeda(t.recebido)]));
+  }
+  conteudo.appendChild(secaoPagamentos);
+
+  preencherIcones(conteudo);
+}
+
+function imprimirFinanceiro(d) {
+  const area = $('areaImpressao');
+  area.innerHTML = '';
+  const t = d.totais;
+
+  const cabecalho = el('div', 'imp-cabecalho');
+  cabecalho.appendChild(el('strong', '', 'Tempero de Mãe · Relatório financeiro · ' + d.nome_empresa));
+  cabecalho.appendChild(el('span', '', textoPeriodo(d.inicio, d.fim) + ' · gerado em ' +
+    new Date(d.gerado_em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })));
+  area.appendChild(cabecalho);
+
+  function tabela(titulos, linhas, total, numeros) {
+    const tab = el('table', 'imp-tabela imp-tabela-relatorio');
+    const cabeca = el('tr');
+    titulos.forEach(function(titulo, i) { cabeca.appendChild(el('th', numeros.indexOf(i) !== -1 ? 'num' : '', titulo)); });
+    tab.appendChild(el('thead')).appendChild(cabeca);
+    const corpo = el('tbody');
+    linhas.concat(total ? [total] : []).forEach(function(valores, indice) {
+      const linha = el('tr', total && indice === linhas.length ? 'imp-total' : '');
+      valores.forEach(function(valor, i) { linha.appendChild(el('td', numeros.indexOf(i) !== -1 ? 'num' : '', valor)); });
+      corpo.appendChild(linha);
+    });
+    tab.appendChild(corpo);
+    return tab;
+  }
+
+  const secao = el('section', 'imp-resumo');
+  secao.appendChild(el('h2', '', 'Resumo'));
+  secao.appendChild(tabela(['', 'Valor'], [
+    ['Consumo no período (' + d.consumo.quentinhas + ' quentinhas)', formatarMoeda(d.consumo.valor)],
+    ['Ainda não cobrado', formatarMoeda(d.consumo.valor_nao_cobrado)],
+    ['Cobranças (antes dos descontos)', formatarMoeda(t.valor_bruto)],
+    ['Descontos', '− ' + formatarMoeda(t.descontos)],
+    ['Total cobrado', formatarMoeda(t.valor_liquido)],
+    ['Recebido', formatarMoeda(t.recebido)],
+    ['A receber (no prazo)', formatarMoeda(t.a_receber)],
+    ['Vencido', formatarMoeda(t.vencido)]
+  ], ['Falta receber', formatarMoeda(t.saldo)], [1]));
+
+  secao.appendChild(el('h3', 'imp-subtitulo', 'Cobranças'));
+  secao.appendChild(tabela(
+    ['Nº', 'Período', 'Vencimento', 'Valor', 'Desconto', 'Pago', 'Saldo', 'Situação'],
+    d.cobrancas.map(function(x) {
+      return [x.numero_texto, textoPeriodo(x.periodo_inicio, x.periodo_fim), formatarData(x.data_vencimento),
+        formatarMoeda(x.valor_bruto), x.desconto ? '− ' + formatarMoeda(x.desconto) : '—',
+        formatarMoeda(x.valor_pago), formatarMoeda(x.saldo), SITUACOES_FINANCEIRO[x.situacao].texto];
+    }),
+    ['Total', '', '', formatarMoeda(t.valor_bruto), '− ' + formatarMoeda(t.descontos), formatarMoeda(t.recebido), formatarMoeda(t.saldo), ''],
+    [3, 4, 5, 6]
+  ));
+
+  secao.appendChild(el('h3', 'imp-subtitulo', 'Descontos e motivos'));
+  if (d.descontos.length) {
+    secao.appendChild(tabela(
+      ['Nº', 'Período', 'Motivo', 'Valor da cobrança', 'Desconto', '%'],
+      d.descontos.map(function(x) {
+        return [x.cobranca, textoPeriodo(x.periodo_inicio, x.periodo_fim), x.motivo,
+          formatarMoeda(x.valor_bruto), formatarMoeda(x.desconto), porcentagemTexto(x.percentual)];
+      }),
+      ['Total', '', '', '', formatarMoeda(t.descontos), ''],
+      [3, 4, 5]
+    ));
+  } else {
+    secao.appendChild(el('p', 'imp-contagem', 'Nenhum desconto no período.'));
+  }
+
+  secao.appendChild(el('h3', 'imp-subtitulo', 'Pagamentos recebidos'));
+  if (d.pagamentos.length) {
+    secao.appendChild(tabela(
+      ['Data', 'Cobrança', 'Forma', 'Valor'],
+      d.pagamentos.map(function(x) { return [formatarData(x.data), x.cobranca, x.forma, formatarMoeda(x.valor)]; }),
+      ['Total', '', '', formatarMoeda(t.recebido)],
+      [3]
+    ));
+  } else {
+    secao.appendChild(el('p', 'imp-contagem', 'Nenhum pagamento registrado.'));
+  }
+
+  area.appendChild(secao);
+  setTimeout(function() { window.print(); }, 60);
+}
+
+function baixarFinanceiroExcel(d) {
+  const t = d.totais;
+  const moeda = function(v) { return { n: v, estilo: 2 }; };
+  const data = function(texto) { return texto ? { data: texto } : ''; };
+  const negrito = function(v) { return { s: v, estilo: 4 }; };
+  const negritoMoeda = function(v) { return { n: v, estilo: 5 }; };
+
+  const abas = [
+    {
+      nome: 'Resumo',
+      larguras: [36, 22],
+      linhas: [
+        [negrito('Tempero de Mãe · Relatório financeiro')],
+        ['Empresa', d.nome_empresa],
+        ['Período', textoPeriodo(d.inicio, d.fim)],
+        ['Gerado em', new Date(d.gerado_em).toLocaleString('pt-BR')],
+        [],
+        ['Quentinhas no período', d.consumo.quentinhas],
+        ['Consumo no período', moeda(d.consumo.valor)],
+        ['Ainda não cobrado', moeda(d.consumo.valor_nao_cobrado)],
+        [],
+        ['Cobranças', t.cobrancas],
+        ['Valor das cobranças', moeda(t.valor_bruto)],
+        ['Descontos', moeda(t.descontos)],
+        ['Total cobrado', moeda(t.valor_liquido)],
+        ['Recebido', moeda(t.recebido)],
+        ['A receber (no prazo)', moeda(t.a_receber)],
+        ['Vencido', moeda(t.vencido)],
+        [negrito('Falta receber'), negritoMoeda(t.saldo)]
+      ]
+    },
+    {
+      nome: 'Cobranças',
+      cabecalho: true,
+      larguras: [8, 12, 12, 12, 12, 10, 14, 14, 34, 14, 14, 14, 16],
+      linhas: [['Nº', 'Início', 'Fim', 'Emissão', 'Vencimento', 'Quentinhas', 'Valor', 'Desconto', 'Motivo do desconto', 'Total', 'Pago', 'Saldo', 'Situação']]
+        .concat(d.cobrancas.map(function(x) {
+          return [x.numero_texto, data(x.periodo_inicio), data(x.periodo_fim), data(x.data_emissao), data(x.data_vencimento),
+            x.quantidade, moeda(x.valor_bruto), moeda(x.desconto), x.motivo_desconto, moeda(x.valor_liquido),
+            moeda(x.valor_pago), moeda(x.saldo), SITUACOES_FINANCEIRO[x.situacao].texto];
+        }))
+        .concat([[negrito('Total'), '', '', '', '', '', negritoMoeda(t.valor_bruto), negritoMoeda(t.descontos), '',
+          negritoMoeda(t.valor_liquido), negritoMoeda(t.recebido), negritoMoeda(t.saldo), '']])
+    },
+    {
+      nome: 'Descontos',
+      cabecalho: true,
+      larguras: [8, 12, 12, 40, 16, 14, 8],
+      linhas: [['Nº', 'Início', 'Fim', 'Motivo', 'Valor da cobrança', 'Desconto', '%']]
+        .concat(d.descontos.map(function(x) {
+          return [x.cobranca, data(x.periodo_inicio), data(x.periodo_fim), x.motivo, moeda(x.valor_bruto), moeda(x.desconto), x.percentual];
+        }))
+        .concat([[negrito('Total'), '', '', '', '', negritoMoeda(t.descontos), '']])
+    },
+    {
+      nome: 'Pagamentos',
+      cabecalho: true,
+      larguras: [12, 10, 16, 34, 14],
+      linhas: [['Data', 'Cobrança', 'Forma', 'Observações', 'Valor']]
+        .concat(d.pagamentos.map(function(x) { return [data(x.data), x.cobranca, x.forma, x.observacoes, moeda(x.valor)]; }))
+        .concat([[negrito('Total'), '', '', '', negritoMoeda(t.recebido)]])
+    }
+  ];
+
+  const nomeArquivo = 'tempero-de-mae_financeiro_' + normalizarBusca(d.nome_empresa).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') +
+    '_' + d.inicio + '_a_' + d.fim + '.xlsx';
+
+  try {
+    const arquivo = montarXlsx(abas);
+    const endereco = URL.createObjectURL(new Blob([arquivo], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    }));
+    const link = el('a');
+    link.href = endereco;
+    link.download = nomeArquivo;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function() { URL.revokeObjectURL(endereco); }, 60000);
+    avisar('Planilha "' + nomeArquivo + '" baixada.');
+  } catch (erro) {
+    console.error(erro);
+    avisar('Não foi possível gerar a planilha: ' + erro.message, 'erro');
   }
 }
 

@@ -1,6 +1,8 @@
 // ================================================================
 // CARDAPIOS.gs
-// Cardápio semanal (segunda a sexta), montado pelo restaurante.
+// Cardápio semanal (segunda a domingo), montado pelo restaurante.
+// Cada dia pode ser fechado (feriado, folga): sem cardápio e sem pedidos.
+// Sábado e domingo começam fechados; o restaurante abre quando atender.
 // Cada dia tem 4 grupos: acompanhamentos, saladas, guarnições e
 // proteínas (o funcionário escolhe uma), mais uma opção extra gratuita.
 // A semana fica em RASCUNHO até ser PUBLICADA; só então as empresas veem.
@@ -17,8 +19,11 @@ const COLUNAS_CARDAPIOS = {
   PROTEINAS: 7,
   EXTRA: 8,
   OBSERVACOES: 9,
-  STATUS: 10
+  STATUS: 10,
+  FECHADO: 11      // SIM = fechado · NAO = aberto · vazio = padrão do dia
 };
+
+const DIAS_SEMANA_CARDAPIO = 7;   // segunda a domingo
 
 const GRUPOS_CARDAPIO = ['acompanhamentos', 'saladas', 'guarnicoes', 'proteinas'];
 
@@ -65,8 +70,10 @@ function lerCardapios_() {
       proteinas: separarItens_(linha[6]),
       opcao_extra: String(linha[7] || '').trim(),
       observacoes: String(linha[8] || '').trim(),
-      status: String(linha[9]).trim().toUpperCase() === 'PUBLICADO' ? 'PUBLICADO' : 'RASCUNHO'
+      status: String(linha[9]).trim().toUpperCase() === 'PUBLICADO' ? 'PUBLICADO' : 'RASCUNHO',
+      marca_fechado: String(linha[10] || '').trim().toUpperCase()
     });
+    lista[lista.length - 1].fechado = diaFechado_(lista[lista.length - 1], lista[lista.length - 1].data);
   }
 
   return {
@@ -111,6 +118,26 @@ function nomeDoDia_(texto) {
   return NOMES_DIAS[converterDataFormulario(texto).getDay()];
 }
 
+function fimDeSemana_(texto) {
+  const dia = converterDataFormulario(texto).getDay();
+  return dia === 0 || dia === 6;
+}
+
+// Dia fechado? Marcação do restaurante; sem marcação, sábado e domingo
+// ficam fechados e os outros dias abertos.
+function diaFechado_(cardapio, dataTexto) {
+  const marca = cardapio ? cardapio.marca_fechado : '';
+  if (marca === 'SIM') return true;
+  if (marca === 'NAO') return false;
+  return fimDeSemana_(dataTexto);
+}
+
+// O dia está fechado? (consulta a planilha; usado nos pedidos)
+function diaFechadoNaData_(dataTexto) {
+  const cardapio = lerCardapios_().lista.find(c => c.data === dataTexto) || null;
+  return { fechado: diaFechado_(cardapio, dataTexto), observacoes: cardapio ? cardapio.observacoes : '' };
+}
+
 // ----------------------------------------------------------------
 // MONTAGEM DA SEMANA
 // ----------------------------------------------------------------
@@ -130,37 +157,52 @@ function diaParaNavegador_(cardapio, dataTexto) {
     proteinas: cardapio ? cardapio.proteinas : [],
     opcao_extra: cardapio ? cardapio.opcao_extra : '',
     observacoes: cardapio ? cardapio.observacoes : '',
-    status: cardapio ? cardapio.status : 'RASCUNHO'
+    status: cardapio ? cardapio.status : 'RASCUNHO',
+    fechado: diaFechado_(cardapio, dataTexto)
   };
 }
 
 // Situação de uma semana: VAZIA, RASCUNHO ou PUBLICADO
 function situacaoDaSemana_(dias) {
-  const preenchidos = dias.filter(dia => dia.existe && (diaTemConteudo_(dia) || dia.observacoes));
+  const preenchidos = dias.filter(dia => dia.existe && !dia.fechado && (diaTemConteudo_(dia) || dia.observacoes));
 
   if (!preenchidos.length) return 'VAZIA';
   if (preenchidos.some(dia => dia.status === 'PUBLICADO')) return 'PUBLICADO';
   return 'RASCUNHO';
 }
 
-// Monta os 5 dias (segunda a sexta) de uma semana
+// Monta os 7 dias (segunda a domingo) de uma semana
 function montarSemana_(segunda, somentePublicados) {
   const lista = lerCardapios_().lista;
-  const sexta = somarDiasTexto_(segunda, 4);
+  const domingo = somarDiasTexto_(segunda, DIAS_SEMANA_CARDAPIO - 1);
   const dias = [];
 
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < DIAS_SEMANA_CARDAPIO; i++) {
     const dataTexto = somarDiasTexto_(segunda, i);
     let cardapio = lista.find(c => c.data === dataTexto) || null;
 
-    if (somentePublicados && cardapio && cardapio.status !== 'PUBLICADO') cardapio = null;
+    // Empresas: rascunho não aparece, mas "fechado" sim (é um aviso)
+    if (somentePublicados && cardapio && cardapio.status !== 'PUBLICADO') {
+      cardapio = cardapio.fechado
+        ? { acompanhamentos: [], saladas: [], guarnicoes: [], proteinas: [], opcao_extra: '',
+            observacoes: cardapio.observacoes, status: 'RASCUNHO', marca_fechado: 'SIM' }
+        : null;
+    }
 
-    dias.push(diaParaNavegador_(cardapio, dataTexto));
+    const dia = diaParaNavegador_(cardapio, dataTexto);
+
+    // Dia fechado: as empresas não veem o cardápio guardado
+    if (somentePublicados && dia.fechado) {
+      GRUPOS_CARDAPIO.forEach(grupo => { dia[grupo] = []; });
+      dia.opcao_extra = '';
+    }
+
+    dias.push(dia);
   }
 
   return {
     segunda: segunda,
-    sexta: sexta,
+    domingo: domingo,
     status: situacaoDaSemana_(dias),
     versao: assinaturaSemana_(dias),
     dias: dias
@@ -177,7 +219,8 @@ function assinaturaSemana_(dias) {
     (dia.guarnicoes || []).join('|'),
     (dia.proteinas || []).join('|'),
     dia.opcao_extra || '',
-    dia.observacoes || ''
+    dia.observacoes || '',
+    dia.fechado ? 'F' : ''
   ].join('¦'));
 
   return Utilities.base64EncodeWebSafe(
@@ -265,10 +308,12 @@ function salvarSemanaCardapio(token, segunda, dias, versaoEsperada) {
   exigirTela_(token, 'cardapios');
 
   segunda = segundaDaSemana_(validarDataFormulario_(segunda));
-  const sexta = somarDiasTexto_(segunda, 4);
+  const domingo = somarDiasTexto_(segunda, DIAS_SEMANA_CARDAPIO - 1);
 
-  if (!Array.isArray(dias) || dias.length !== 5) {
-    throw new Error('O cardápio precisa ter os 5 dias da semana.');
+  // 7 dias (segunda a domingo). Aceita também 5 (segunda a sexta, telas
+  // abertas antes da atualização): nesse caso sábado e domingo não mudam.
+  if (!Array.isArray(dias) || (dias.length !== DIAS_SEMANA_CARDAPIO && dias.length !== 5)) {
+    throw new Error('O sistema foi atualizado (agora o cardápio vai de segunda a domingo). Recarregue a página (tecla F5) para continuar.');
   }
 
   const limpos = dias.map((dia, indice) => {
@@ -286,7 +331,7 @@ function salvarSemanaCardapio(token, segunda, dias, versaoEsperada) {
 
   return comBloqueio_(() => {
     const cardapios = lerCardapios_();
-    const daSemana = cardapios.lista.filter(c => c.data >= segunda && c.data <= sexta);
+    const daSemana = cardapios.lista.filter(c => c.data >= segunda && c.data <= domingo);
     const situacao = daSemana.some(c => c.status === 'PUBLICADO') ? 'PUBLICADO' : 'RASCUNHO';
     const aba = cardapios.aba;
 
@@ -312,18 +357,21 @@ function salvarSemanaCardapio(token, segunda, dias, versaoEsperada) {
         textoPlanilha_(dia.observacoes)
       ];
 
+      // O "fechado" não muda aqui (tem botão próprio): só entra na conta da versão
+      const fechado = diaFechado_(atual || null, dia.data);
+
       if (atual) {
         aba.getRange(atual.linha, COLUNAS_CARDAPIOS.ACOMPANHAMENTOS, 1, 6).setValues([valores]);
-        gravados.push(dia);
+        gravados.push(Object.assign({}, dia, { fechado: fechado }));
       } else if (diaTemConteudo_(dia) || dia.observacoes) {
         aba.appendRow(
           ['CAR-' + Utilities.getUuid(), converterDataFormulario(dia.data), nomeDoDia_(dia.data)]
             .concat(valores)
-            .concat([situacao])
+            .concat([situacao, ''])
         );
-        gravados.push(dia);
+        gravados.push(Object.assign({}, dia, { fechado: fechado }));
       } else {
-        gravados.push({ data: dia.data });   // dia continua sem linha na planilha
+        gravados.push({ data: dia.data, fechado: fechado });   // dia continua sem linha na planilha
       }
     });
 
@@ -340,13 +388,13 @@ function salvarSemanaCardapio(token, segunda, dias, versaoEsperada) {
 function publicarSemanaCardapio(token, segunda, publicar) {
   const sessao = exigirTela_(token, 'cardapios');
   segunda = segundaDaSemana_(validarDataFormulario_(segunda));
-  const sexta = somarDiasTexto_(segunda, 4);
+  const domingo = somarDiasTexto_(segunda, DIAS_SEMANA_CARDAPIO - 1);
   const novoStatus = publicar === true ? 'PUBLICADO' : 'RASCUNHO';
 
   return comBloqueio_(() => {
     const cardapios = lerCardapios_();
-    const daSemana = cardapios.lista.filter(c => c.data >= segunda && c.data <= sexta);
-    const preenchidos = daSemana.filter(c => diaTemConteudo_(c) || c.observacoes);
+    const daSemana = cardapios.lista.filter(c => c.data >= segunda && c.data <= domingo);
+    const preenchidos = daSemana.filter(c => !c.fechado && (diaTemConteudo_(c) || c.observacoes));
 
     if (publicar && !preenchidos.length) {
       throw new Error('A semana está vazia. Monte o cardápio antes de publicar.');
@@ -372,7 +420,7 @@ function publicarSemanaCardapio(token, segunda, publicar) {
     });
 
     registrarLog_(null, sessao, '', publicar ? 'PUBLICAR_CARDAPIO' : 'DESPUBLICAR_CARDAPIO',
-      'Cardápio da semana de ' + formatarDataBR_(segunda) + ' a ' + formatarDataBR_(sexta) +
+      'Cardápio da semana de ' + formatarDataBR_(segunda) + ' a ' + formatarDataBR_(domingo) +
       (publicar ? ' publicado' : ' voltou para rascunho'));
 
     const semana = montarSemana_(segunda, false);
@@ -383,6 +431,61 @@ function publicarSemanaCardapio(token, segunda, publicar) {
       mensagem: publicar
         ? 'Cardápio publicado. As empresas já podem ver.'
         : 'Cardápio voltou para rascunho. As empresas não o veem mais.',
+      semana: semana
+    };
+  });
+}
+
+// ABRIR OU FECHAR UM DIA (feriado, folga, sábado/domingo com atendimento)
+// Fechado: as empresas veem "fechado" e não conseguem pedir. O cardápio
+// que já estava montado fica guardado e volta se o dia for reaberto.
+function definirDiaFechado(token, data, fechado) {
+  const sessao = exigirTela_(token, 'cardapios');
+  const dataTexto = validarDataFormulario_(data);
+  fechado = fechado === true;
+
+  return comBloqueio_(() => {
+    const cardapios = lerCardapios_();
+    const atual = cardapios.lista.find(c => c.data === dataTexto) || null;
+
+    if (fechado) {
+      const ativos = lerPedidos_().lista.filter(p =>
+        p.data_entrega === dataTexto && (p.status === 'ENVIADO' || p.status === 'CONFIRMADO')
+      );
+
+      if (ativos.length) {
+        throw new Error('Já existe' + (ativos.length > 1 ? 'm ' + ativos.length + ' pedidos' : ' 1 pedido') +
+          ' para ' + nomeDoDia_(dataTexto).toLowerCase() + '. Recuse ou cancele antes de fechar o dia.');
+      }
+    }
+
+    const marca = fechado ? 'SIM' : 'NAO';
+
+    if (atual) {
+      cardapios.aba.getRange(atual.linha, COLUNAS_CARDAPIOS.FECHADO).setValue(marca);
+    } else {
+      const segunda = segundaDaSemana_(dataTexto);
+      const domingo = somarDiasTexto_(segunda, DIAS_SEMANA_CARDAPIO - 1);
+      const publicada = cardapios.lista.some(c => c.data >= segunda && c.data <= domingo && c.status === 'PUBLICADO');
+
+      cardapios.aba.appendRow([
+        'CAR-' + Utilities.getUuid(), converterDataFormulario(dataTexto), nomeDoDia_(dataTexto),
+        '', '', '', '', '', '', publicada ? 'PUBLICADO' : 'RASCUNHO', marca
+      ]);
+    }
+
+    marcarPedidosAlterados_();
+    registrarLog_(null, sessao, '', fechado ? 'FECHAR_DIA' : 'ABRIR_DIA',
+      nomeDoDia_(dataTexto) + ', ' + formatarDataBR_(dataTexto) + (fechado ? ': fechado' : ': aberto'));
+
+    const semana = montarSemana_(segundaDaSemana_(dataTexto), false);
+    semana.itens_frequentes = itensFrequentes_();
+
+    return {
+      sucesso: true,
+      mensagem: fechado
+        ? nomeDoDia_(dataTexto) + ' fechado: as empresas não poderão pedir neste dia.'
+        : nomeDoDia_(dataTexto) + ' aberto: monte o cardápio para as empresas pedirem.',
       semana: semana
     };
   });
@@ -429,7 +532,7 @@ function cardapioEmDestaque_() {
   const fuso = Session.getScriptTimeZone();
   const hoje = hojeTexto_(fuso);
   const publicados = lerCardapios_().lista
-    .filter(c => c.status === 'PUBLICADO' && c.data >= hoje && (diaTemConteudo_(c) || c.observacoes))
+    .filter(c => c.status === 'PUBLICADO' && !c.fechado && c.data >= hoje && (diaTemConteudo_(c) || c.observacoes))
     .sort((a, b) => a.data.localeCompare(b.data));
 
   const proximo = publicados.find(c => c.data <= somarDiasTexto_(hoje, 7));

@@ -109,35 +109,53 @@ function salvarHorarioLimite(token, valor) {
 // ----------------------------------------------------------------
 // PRAZO
 // ----------------------------------------------------------------
-function prazoPedido_(dataTexto) {
+// empresaId (opcional): considera o prazo extra liberado para a empresa
+function prazoPedido_(dataTexto, empresaId) {
   const fuso = Session.getScriptTimeZone();
   const agora = new Date();
   const hoje = Utilities.formatDate(agora, fuso, 'yyyy-MM-dd');
   const hora = Utilities.formatDate(agora, fuso, 'HH:mm');
   const limite = horarioLimite_();
-  const diaSemana = converterDataFormulario(dataTexto).getDay();
+  const dia = diaFechadoNaData_(dataTexto);
 
   let aberto = true;
   let motivo = '';
+  let limiteValendo = limite;
+  let prazoExtra = false;
+  let encerradoPorHorario = false;
 
   if (dataTexto !== hoje) {
     aberto = false;
     motivo = dataTexto < hoje
       ? 'Este dia já passou.'
       : 'O pedido só é liberado no próprio dia.';
-  } else if (diaSemana === 0 || diaSemana === 6) {
+  } else if (dia.fechado) {
     aberto = false;
-    motivo = 'Não há atendimento aos fins de semana.';
+    motivo = 'O restaurante não abre hoje' + (dia.observacoes ? ' (' + dia.observacoes + ')' : '') + '.';
   } else if (hora >= limite) {
     aberto = false;
+    encerradoPorHorario = true;
     motivo = 'Os pedidos de hoje foram encerrados às ' + limite + '.';
+
+    // Prazo extra liberado pelo restaurante (só hoje)
+    const extra = empresaId ? prazoExtraAtivo_(empresaId, hoje, agora.getTime()) : null;
+    if (extra) {
+      aberto = true;
+      motivo = '';
+      limiteValendo = extra.ate;
+      prazoExtra = true;
+    }
   }
 
   return {
     data: dataTexto,
     hoje: hoje,
     hora_atual: hora,
-    limite: limite,
+    limite: limiteValendo,
+    limite_normal: limite,
+    prazo_extra: prazoExtra,
+    encerrado_por_horario: encerradoPorHorario,
+    dia_fechado: dia.fechado,
     aberto: aberto,
     motivo: motivo,
     agora_ms: agora.getTime()
@@ -264,7 +282,7 @@ function pedidoParaNavegador_(pedido, itens, nomeEmpresa) {
 // Cardápio publicado de um dia
 function cardapioPublicadoDoDia_(dataTexto) {
   return lerCardapios_().lista.find(c =>
-    c.data === dataTexto && c.status === 'PUBLICADO'
+    c.data === dataTexto && c.status === 'PUBLICADO' && !c.fechado
   ) || null;
 }
 
@@ -298,7 +316,7 @@ function pedidoSemValores_(pedido) {
 function montarEstadoPedidoEmpresa_(empresaId) {
   const fuso = Session.getScriptTimeZone();
   const hoje = hojeTexto_(fuso);
-  const prazo = prazoPedido_(hoje);
+  const prazo = prazoPedido_(hoje, empresaId);
   const cardapio = cardapioPublicadoDoDia_(hoje);
   const preco = precoVigente_(lerPrecos_().lista, empresaId, hoje);
   const config = configDaEmpresaPorId_(empresaId);
@@ -355,7 +373,9 @@ function montarEstadoPedidoEmpresa_(empresaId) {
     },
     funcionarios: funcionarios,
     pedido: config.mostrar_precos ? pedido : pedidoSemValores_(pedido),
-    ultimo_pedido: ultimoPedido
+    ultimo_pedido: ultimoPedido,
+    prazo_extra: situacaoPrazoExtra_(empresaId, hoje),
+    minutos_prazo_extra: MINUTOS_PRAZO_EXTRA
   };
 }
 
@@ -366,7 +386,7 @@ function salvarPedidoEmpresa(token, dados) {
   const fuso = Session.getScriptTimeZone();
   const hoje = hojeTexto_(fuso);
 
-  const prazo = prazoPedido_(hoje);
+  const prazo = prazoPedido_(hoje, empresaId);
   if (!prazo.aberto) throw new Error(prazo.motivo);
 
   const cardapio = cardapioPublicadoDoDia_(hoje);
@@ -492,7 +512,7 @@ function salvarPedidoEmpresa(token, dados) {
 
   return comBloqueio_(() => {
     // O horário é conferido de novo, já dentro do bloqueio
-    const prazoAgora = prazoPedido_(hoje);
+    const prazoAgora = prazoPedido_(hoje, empresaId);
     if (!prazoAgora.aberto) throw new Error(prazoAgora.motivo);
 
     const pedidos = lerPedidos_();
@@ -595,7 +615,7 @@ function cancelarPedidoEmpresa(token) {
   const hoje = hojeTexto_(Session.getScriptTimeZone());
 
   return comBloqueio_(() => {
-    const prazo = prazoPedido_(hoje);
+    const prazo = prazoPedido_(hoje, empresaId);
     if (!prazo.aberto) throw new Error(prazo.motivo);
 
     const pedidos = lerPedidos_();
@@ -694,8 +714,7 @@ function montarPedidosDia_(dia) {
   const comPedido = {};
   pedidos.forEach(p => { if (p.status !== 'CANCELADO' && p.empresa_id) comPedido[p.empresa_id] = true; });
 
-  const diaSemana = converterDataFormulario(dia).getDay();
-  const semPedido = (diaSemana === 0 || diaSemana === 6) ? [] : empresas
+  const semPedido = diaFechadoNaData_(dia).fechado ? [] : empresas
     .filter(e => e.status === 'ATIVO' && !comPedido[e.empresa_id])
     .map(e => e.nome_empresa)
     .sort((a, b) => a.localeCompare(b, 'pt-BR'));
@@ -710,7 +729,9 @@ function montarPedidosDia_(dia) {
     preco_cliente_avulso: lerConfiguracao_('PRECO_CLIENTE_AVULSO', ''),
     pedidos: pedidos,
     producao: producao,
-    sem_pedido: semPedido
+    sem_pedido: semPedido,
+    prazos_extras: prazosExtrasDoDia_(dia),
+    minutos_prazo_extra: MINUTOS_PRAZO_EXTRA
   };
 }
 
@@ -826,7 +847,8 @@ function resumoPedidosAdmin_() {
     pedidos: validos.length,
     quentinhas: validos.reduce((total, p) => total + p.quantidade_total, 0),
     pendentes: doDia.filter(p => p.status === 'ENVIADO').length,
-    prazo: prazoPedido_(hoje)
+    prazo: prazoPedido_(hoje),
+    prazos_pendentes: prazosExtrasDoDia_(hoje).filter(s => s.status === 'PENDENTE')
   };
 }
 
@@ -838,7 +860,8 @@ function resumoPedidoEmpresa_(empresaId) {
 
   return {
     data: hoje,
-    prazo: prazoPedido_(hoje),
+    prazo: prazoPedido_(hoje, empresaId),
+    prazo_extra: situacaoPrazoExtra_(empresaId, hoje),
     cardapio_publicado: !!cardapioPublicadoDoDia_(hoje),
     pedido_id: pedido ? pedido.pedido_id : '',
     status: pedido ? pedido.status : '',

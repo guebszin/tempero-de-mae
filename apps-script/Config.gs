@@ -17,7 +17,7 @@ const ESTRUTURA = {
   EMPRESAS: ['empresa_id', 'nome_empresa', 'cnpj', 'telefone', 'email', 'endereco', 'status', 'data_cadastro', 'ciclo_cobranca', 'dias_vencimento', 'configuracoes'],
   USUARIOS: ['usuario_id', 'empresa_id', 'nome', 'email', 'senha_hash', 'perfil', 'status', 'data_cadastro', 'login', 'permissoes'],
   FUNCIONARIOS: ['funcionario_id', 'empresa_id', 'nome', 'matricula', 'setor', 'telefone', 'pode_alterar_quentinha', 'status'],
-  CARDAPIOS: ['cardapio_id', 'data', 'dia_semana', 'acompanhamentos', 'saladas', 'guarnicoes', 'proteinas', 'opcao_extra', 'observacoes', 'status'],
+  CARDAPIOS: ['cardapio_id', 'data', 'dia_semana', 'acompanhamentos', 'saladas', 'guarnicoes', 'proteinas', 'opcao_extra', 'observacoes', 'status', 'fechado'],
   PEDIDOS: ['pedido_id', 'empresa_id', 'data_pedido', 'data_entrega', 'usuario_id', 'status', 'observacoes', 'valor_total', 'quantidade_total', 'atualizado_em', 'confirmado_em', 'resposta_restaurante', 'cliente_nome', 'cliente_telefone', 'cobranca_id'],
   ITENS_PEDIDOS: ['item_id', 'pedido_id', 'empresa_id', 'funcionario_id', 'cardapio_id', 'tipo_quentinha', 'quantidade', 'preco_unitario', 'subtotal', 'observacoes', 'nome', 'proteina', 'opcao_extra', 'itens_removidos'],
   COBRANCAS: ['cobranca_id', 'empresa_id', 'periodo_inicio', 'periodo_fim', 'data_emissao', 'data_vencimento', 'valor_total', 'status', 'observacoes', 'numero', 'quantidade_total', 'quantidade_pedidos', 'valor_pago', 'criado_por', 'atualizado_em', 'motivo_cancelamento', 'desconto', 'motivo_desconto'],
@@ -26,7 +26,8 @@ const ESTRUTURA = {
   CONFIG: ['chave', 'valor', 'descricao'],
   PRECOS: ['preco_id', 'empresa_id', 'tipo_quentinha', 'valor_unitario', 'data_inicio', 'data_fim', 'status'],
   EMPRESAS_EXCLUIDAS: ['empresa_id', 'nome_empresa', 'cnpj', 'telefone', 'email', 'endereco', 'excluida_em', 'excluida_por', 'funcionarios', 'resumo'],
-  FUNCIONARIOS_EXCLUIDOS: ['funcionario_id', 'empresa_id', 'nome', 'matricula', 'setor', 'excluido_em', 'excluido_por', 'quentinhas']
+  FUNCIONARIOS_EXCLUIDOS: ['funcionario_id', 'empresa_id', 'nome', 'matricula', 'setor', 'excluido_em', 'excluido_por', 'quentinhas'],
+  PRAZOS_EXTRAS: ['solicitacao_id', 'empresa_id', 'data', 'solicitado_em', 'solicitado_por', 'mensagem', 'status', 'respondido_em', 'respondido_por', 'liberado_ate', 'resposta']
 };
 
 // Usada para representar "sem data final" nas comparações de período

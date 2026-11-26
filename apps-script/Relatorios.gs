@@ -232,3 +232,134 @@ function montarRelatorio_(inicio, fim, filtroEmpresa, idsPedidos) {
 function arredondar_(valor) {
   return Math.round((Number(valor) || 0) * 100) / 100;
 }
+
+// ================================================================
+// RELATÓRIO FINANCEIRO DE UMA EMPRESA
+// Consumo do período, cobranças (com descontos e motivos), pagamentos
+// e o que ainda falta receber. Uma cobrança entra se o período dela
+// tiver algum dia dentro do período escolhido.
+// filtros = { empresa: empresa_id, inicio: 'aaaa-mm-dd', fim: 'aaaa-mm-dd' }
+// ================================================================
+function gerarRelatorioFinanceiro(token, filtros) {
+  exigirTela_(token, 'relatorios');
+  filtros = filtros || {};
+
+  if (!moduloCobrancasAtivo_()) throw new Error('O módulo de cobranças está desligado (Sistema › Configurações).');
+
+  const inicio = validarDataFormulario_(filtros.inicio);
+  const fim = validarDataFormulario_(filtros.fim);
+  if (fim < inicio) throw new Error('A data final precisa ser igual ou depois da data inicial.');
+
+  const dias = Math.round((converterDataFormulario(fim) - converterDataFormulario(inicio)) / 86400000) + 1;
+  if (dias > MAXIMO_DIAS_RELATORIO) throw new Error('Escolha um período de até 1 ano.');
+
+  const empresaId = String(filtros.empresa || '').trim();
+  if (!empresaId || empresaId === FILTRO_CLIENTES_SEM_CADASTRO) throw new Error('Escolha uma empresa.');
+
+  const nomes = nomesEmpresasComExcluidas_();
+  if (!nomes[empresaId]) throw new Error('Empresa não encontrada.');
+
+  return montarRelatorioFinanceiro_(empresaId, inicio, fim, nomes[empresaId]);
+}
+
+function montarRelatorioFinanceiro_(empresaId, inicio, fim, nomeEmpresa) {
+  const hoje = hojeTexto_(Session.getScriptTimeZone());
+
+  // Consumo do período (pedidos enviados e confirmados)
+  const cobrancasTodas = lerCobrancas_().lista.filter(c => c.empresa_id === empresaId);
+  const ativas = {};
+  cobrancasTodas.forEach(c => { if (c.status !== 'CANCELADA') ativas[c.cobranca_id] = c; });
+
+  const pedidos = lerPedidos_().lista.filter(p =>
+    p.empresa_id === empresaId && pedidoCobravel_(p) && p.data_entrega >= inicio && p.data_entrega <= fim
+  );
+
+  const consumo = { pedidos: pedidos.length, quentinhas: 0, valor: 0, valor_cobrado: 0, valor_nao_cobrado: 0 };
+  pedidos.forEach(p => {
+    consumo.quentinhas += p.quantidade_total;
+    consumo.valor += p.valor_total;
+    if (p.cobranca_id && ativas[p.cobranca_id]) consumo.valor_cobrado += p.valor_total;
+    else consumo.valor_nao_cobrado += p.valor_total;
+  });
+  ['valor', 'valor_cobrado', 'valor_nao_cobrado'].forEach(k => { consumo[k] = arredondar_(consumo[k]); });
+
+  // Cobranças com algum dia dentro do período
+  const cobrancas = cobrancasTodas
+    .filter(c => c.status !== 'CANCELADA' && c.periodo_inicio <= fim && c.periodo_fim >= inicio)
+    .sort((a, b) => a.periodo_inicio.localeCompare(b.periodo_inicio) || a.numero - b.numero)
+    .map(c => {
+      const saldo = arredondar_(Math.max(0, c.valor_liquido - c.valor_pago));
+      const vencida = saldo > 0 && c.data_vencimento && c.data_vencimento < hoje;
+      return {
+        cobranca_id: c.cobranca_id,
+        numero: c.numero,
+        numero_texto: numeroCobranca_(c.numero),
+        periodo_inicio: c.periodo_inicio,
+        periodo_fim: c.periodo_fim,
+        data_emissao: c.data_emissao,
+        data_vencimento: c.data_vencimento,
+        quantidade: c.quantidade_total,
+        valor_bruto: c.valor_total,
+        desconto: c.desconto,
+        desconto_percentual: c.valor_total ? Math.round(c.desconto / c.valor_total * 1000) / 10 : 0,
+        motivo_desconto: c.motivo_desconto,
+        valor_liquido: c.valor_liquido,
+        valor_pago: c.valor_pago,
+        saldo: saldo,
+        situacao: saldo <= 0 ? 'PAGA' : (vencida ? 'VENCIDA' : (c.valor_pago > 0 ? 'PARCIAL' : 'ABERTA'))
+      };
+    });
+
+  const ids = {};
+  cobrancas.forEach(c => { ids[c.cobranca_id] = c; });
+
+  const pagamentos = lerPagamentos_().lista
+    .filter(p => ids[p.cobranca_id])
+    .sort((a, b) => a.data_pagamento.localeCompare(b.data_pagamento))
+    .map(p => ({
+      data: p.data_pagamento,
+      cobranca: ids[p.cobranca_id].numero_texto,
+      valor: p.valor_pago,
+      forma: FORMAS_PAGAMENTO[p.forma_pagamento] || p.forma_pagamento || '—',
+      observacoes: p.observacoes
+    }));
+
+  const descontos = cobrancas
+    .filter(c => c.desconto > 0)
+    .map(c => ({
+      cobranca: c.numero_texto,
+      periodo_inicio: c.periodo_inicio,
+      periodo_fim: c.periodo_fim,
+      valor_bruto: c.valor_bruto,
+      desconto: c.desconto,
+      percentual: c.desconto_percentual,
+      motivo: c.motivo_desconto || 'Sem motivo informado'
+    }));
+
+  const soma = campo => arredondar_(cobrancas.reduce((t, c) => t + c[campo], 0));
+  const totais = {
+    cobrancas: cobrancas.length,
+    valor_bruto: soma('valor_bruto'),
+    descontos: soma('desconto'),
+    valor_liquido: soma('valor_liquido'),
+    recebido: soma('valor_pago'),
+    a_receber: arredondar_(cobrancas.filter(c => c.situacao !== 'VENCIDA').reduce((t, c) => t + c.saldo, 0)),
+    vencido: arredondar_(cobrancas.filter(c => c.situacao === 'VENCIDA').reduce((t, c) => t + c.saldo, 0)),
+    cobrancas_com_desconto: descontos.length
+  };
+  totais.saldo = arredondar_(totais.a_receber + totais.vencido);
+
+  return {
+    tipo: 'FINANCEIRO',
+    empresa_id: empresaId,
+    nome_empresa: nomeEmpresa,
+    inicio: inicio,
+    fim: fim,
+    gerado_em: Date.now(),
+    consumo: consumo,
+    totais: totais,
+    cobrancas: cobrancas,
+    pagamentos: pagamentos,
+    descontos: descontos
+  };
+}
