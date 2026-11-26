@@ -49,9 +49,8 @@
 
   <div class="login-card">
 
-    <div class="marca">
-      <span class="marca-icone" data-icone="marca"></span>
-      Tempero de Mãe
+    <div class="logo-entrada">
+      <img data-logo="completo" alt="Tempero de Mãe" width="180" height="155">
     </div>
 
     <h1>Entrar</h1>
@@ -96,9 +95,8 @@
   <div class="fundo-animado" aria-hidden="true" data-fundo-animado></div>
   <div class="login-card">
 
-    <div class="marca">
-      <span class="marca-icone" data-icone="marca"></span>
-      Tempero de Mãe
+    <div class="logo-entrada">
+      <img data-logo="completo" alt="Tempero de Mãe" width="180" height="155">
     </div>
 
     <div id="conviteCarregando" class="texto-apoio">Abrindo o convite…</div>
@@ -155,8 +153,11 @@
   <!-- MENU LATERAL (computador) / GAVETA (celular) -->
   <aside class="sidebar" id="sidebar">
     <div class="marca">
-      <span class="marca-icone" data-icone="marca"></span>
-      Tempero de Mãe
+      <img class="marca-simbolo" data-logo="simbolo" alt="" width="59" height="38">
+      <span class="marca-nome" aria-label="Tempero de Mãe">
+        <span class="marca-nome-1">Tempero</span>
+        <span class="marca-nome-2">de Mãe</span>
+      </span>
     </div>
 
     <nav class="menu-lateral" id="menuLateral"></nav>
@@ -1081,6 +1082,7 @@
   </div>
 </template>
 
+<?!= incluir('ScriptLogo'); ?>
 <?!= incluir('Script'); ?>
 <?!= incluir('ScriptVersiculos'); ?>
 <?!= incluir('ScriptAdmin'); ?>

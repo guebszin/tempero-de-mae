@@ -23,6 +23,7 @@ python3 teste_modo_teste.py
 | `teste_v26.py` | Modo teste: "Ver como empresa" (entrar, telas da empresa, segurança, voltar, sair do teste) e versículo do dia no Início |
 | `teste_v27.py` | "Manter conectado até o fim do dia": entrada vale só no dia, aba aberta e login salvo expiram à meia-noite, login salvo antigo recusado |
 | `teste_v28.py` | Assinatura "Feito por Luis Guilherme Wermelinger" no login e no Início (visível, inclusive no celular) |
+| `teste_v29.py` | Logo do restaurante: login, primeiro acesso, menu lateral (símbolo + nome) e cabeçalho das impressões/PDF |
 | `teste_periodo_versiculo.py` | Dashboard com datas escolhidas no calendário e versículo do dia no login |
 | `teste_excluir_historico.py` / `teste_limpeza.py` | Exclusões do proprietário com histórico |
 | `teste_tema.py` | Tema claro, escuro e automático |

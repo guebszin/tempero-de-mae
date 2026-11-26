@@ -722,6 +722,7 @@ function imprimirFinanceiro(d) {
   const t = d.totais;
 
   const cabecalho = el('div', 'imp-cabecalho');
+  cabecalho.appendChild(logoImpressao());
   cabecalho.appendChild(el('strong', '', 'Tempero de Mãe · Relatório financeiro · ' + d.nome_empresa));
   cabecalho.appendChild(el('span', '', textoPeriodo(d.inicio, d.fim) + ' · gerado em ' +
     new Date(d.gerado_em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })));
@@ -892,6 +893,7 @@ function imprimirRelatorio(d) {
   area.innerHTML = '';
 
   const cabecalho = el('div', 'imp-cabecalho');
+  cabecalho.appendChild(logoImpressao());
   cabecalho.appendChild(el('strong', '', 'Tempero de Mãe · Relatório de consumo · ' + d.nome_filtro));
   cabecalho.appendChild(el('span', '', textoPeriodo(d.inicio, d.fim) + ' · gerado em ' +
     new Date(d.gerado_em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })));

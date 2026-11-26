@@ -2063,6 +2063,7 @@ function imprimirPedidos(dia, pedidos, opcoes) {
   const agora = new Date();
 
   const cabecalho = el('div', 'imp-cabecalho');
+  cabecalho.appendChild(logoImpressao());
   cabecalho.appendChild(el('strong', '', 'Tempero de Mãe · Pedidos de ' + nomeDoDiaCompleto(dia.data).toLowerCase() + '/' + dia.data.slice(0, 4)));
   cabecalho.appendChild(el('span', '', 'Impresso às ' + horaDe(agora.getTime()) + ' · ' +
     totalGeral + (totalGeral === 1 ? ' quentinha' : ' quentinhas')));

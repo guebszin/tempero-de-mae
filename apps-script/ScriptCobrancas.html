@@ -881,6 +881,7 @@ function imprimirExtratoCobranca(d) {
   }
 
   const cabecalho = el('div', 'imp-cabecalho');
+  cabecalho.appendChild(logoImpressao());
   cabecalho.appendChild(el('strong', '', 'Tempero de Mãe · Extrato de cobrança ' + numeroCobranca(c.numero)));
   cabecalho.appendChild(el('span', '', 'Emitida em ' + formatarData(c.data_emissao) + ' · impresso em ' +
     new Date(d.gerado_em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })));
