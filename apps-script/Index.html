@@ -187,10 +187,14 @@
     <div class="faixa-teste" id="faixaTeste" role="status" hidden>
       <span class="faixa-teste-icone" data-icone="teste"></span>
       <div class="faixa-teste-texto">
-        <strong>Modo teste</strong>
-        <span>Dados fictícios. Nada do que você fizer aqui fica salvo no sistema real.</span>
+        <strong id="faixaTesteTitulo">Modo teste</strong>
+        <span id="faixaTesteTexto">Dados fictícios. Nada do que você fizer aqui fica salvo no sistema real.</span>
       </div>
-      <button type="button" class="botao botao-pequeno faixa-teste-botao" data-acao="sair-teste">Sair do modo teste</button>
+      <div class="faixa-teste-acoes">
+        <button type="button" class="botao botao-pequeno faixa-teste-botao" data-acao="ver-como-empresa" id="botaoVerComoEmpresa" hidden>Ver como empresa</button>
+        <button type="button" class="botao botao-pequeno faixa-teste-botao" data-acao="voltar-restaurante" id="botaoVoltarRestaurante" hidden>Voltar ao restaurante</button>
+        <button type="button" class="botao botao-pequeno faixa-teste-botao" data-acao="sair-teste">Sair do modo teste</button>
+      </div>
     </div>
 
     <header class="topo">
@@ -226,8 +230,15 @@
       <!-- ===== RESTAURANTE: INÍCIO ===== -->
       <section class="view" data-view="inicio-admin" hidden>
         <div class="saudacao">
-          <h2 id="saudacaoAdmin">Olá!</h2>
-          <p id="dataHojeAdmin"></p>
+          <div class="saudacao-textos">
+            <h2 id="saudacaoAdmin">Olá!</h2>
+            <p id="dataHojeAdmin"></p>
+          </div>
+          <figure class="versiculo-inicio" data-versiculo-inicio hidden>
+            <span class="versiculo-rotulo">Versículo do dia</span>
+            <blockquote data-versiculo-texto></blockquote>
+            <figcaption data-versiculo-referencia></figcaption>
+          </figure>
         </div>
 
         <div class="grade-indicadores" id="indicadoresAdmin"></div>
@@ -326,8 +337,15 @@
       <!-- ===== EMPRESA: INÍCIO ===== -->
       <section class="view" data-view="inicio-empresa" hidden>
         <div class="saudacao">
-          <h2 id="saudacaoEmpresa">Olá!</h2>
-          <p id="dataHojeEmpresa"></p>
+          <div class="saudacao-textos">
+            <h2 id="saudacaoEmpresa">Olá!</h2>
+            <p id="dataHojeEmpresa"></p>
+          </div>
+          <figure class="versiculo-inicio" data-versiculo-inicio hidden>
+            <span class="versiculo-rotulo">Versículo do dia</span>
+            <blockquote data-versiculo-texto></blockquote>
+            <figcaption data-versiculo-referencia></figcaption>
+          </figure>
         </div>
 
         <div class="grade-indicadores" id="indicadoresEmpresa"></div>

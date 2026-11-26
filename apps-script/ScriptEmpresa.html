@@ -45,6 +45,7 @@ AO_ENTRAR.push(function(dados, usuario) {
 TELAS['inicio-empresa'] = { carregar: carregarInicioEmpresa };
 
 function carregarInicioEmpresa() {
+  if (typeof mostrarVersiculoInicio === 'function') mostrarVersiculoInicio();   // muda à meia-noite
   $('saudacaoEmpresa').textContent = saudacaoDoHorario() + ', ' + primeiroNome(estado.usuario.nome) + '!';
   $('dataHojeEmpresa').textContent = hojePorExtenso() + ' · ' + (estado.usuario.nome_empresa || '');
 

@@ -1,7 +1,7 @@
 <script>
 // ================================================================
-// VERSÍCULO DO DIA (tela de entrada)
-// Um versículo por dia, acima do quadro de login. Muda à meia-noite
+// VERSÍCULO DO DIA (tela de entrada e tela inicial)
+// Um versículo por dia, acima do quadro de login e no Início. Muda à meia-noite
 // (horário do aparelho) e segue uma ordem embaralhada, para dias
 // seguidos não repetirem versículos parecidos.
 // Texto: redação tradicional da tradução de João Ferreira de Almeida.
@@ -81,5 +81,16 @@ function mostrarVersiculoDoDia() {
   caixa.hidden = false;
 }
 
+// Tela inicial (restaurante e empresa), depois do login
+function mostrarVersiculoInicio() {
+  const versiculo = versiculoDoDia();
+  document.querySelectorAll('[data-versiculo-inicio]').forEach(function(caixa) {
+    caixa.querySelector('[data-versiculo-texto]').textContent = versiculo[0];
+    caixa.querySelector('[data-versiculo-referencia]').textContent = versiculo[1];
+    caixa.hidden = false;
+  });
+}
+
 mostrarVersiculoDoDia();
+mostrarVersiculoInicio();
 </script>

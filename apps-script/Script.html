@@ -1027,6 +1027,8 @@ document.addEventListener('click', function(evento) {
   if (acao.dataset.acao === 'trocar-senha') abrirTrocarSenha();
   if (acao.dataset.acao === 'modo-teste') entrarModoTeste();
   if (acao.dataset.acao === 'sair-teste') sairModoTeste();
+  if (acao.dataset.acao === 'ver-como-empresa') escolherEmpresaParaVer();
+  if (acao.dataset.acao === 'voltar-restaurante') voltarAoRestaurante();
 });
 
 document.addEventListener('keydown', function(evento) {
@@ -1160,6 +1162,14 @@ function sessaoExpirada() {
 function sair() {
   if (!estado.token) return;
 
+  // Vendo como empresa (modo teste): "Sair" volta para o restaurante
+  if (estado.usuario && estado.usuario.simulacao) {
+    $('menuConta').hidden = true;
+    fecharMenuCelular();
+    voltarAoRestaurante();
+    return;
+  }
+
   const pedidoNaoEnviado = typeof pedidoEmpresa !== 'undefined' && pedidoEmpresa.alterado;
 
   const continuar = pedidoNaoEnviado
@@ -1270,8 +1280,18 @@ function limparDadosDaTela() {
 // ----------------------------------------------------------------
 function mostrarModoTeste(usuario) {
   const emTeste = !!usuario.modo_teste;
+  const simulando = emTeste && !!usuario.simulacao;
   document.body.classList.toggle('em-modo-teste', emTeste);
+  document.body.classList.toggle('vendo-como-empresa', simulando);
   $('faixaTeste').hidden = !emTeste;
+
+  $('faixaTesteTitulo').textContent = simulando ? 'Modo teste · vendo como ' + usuario.nome_empresa : 'Modo teste';
+  $('faixaTesteTexto').textContent = simulando
+    ? 'É exatamente a tela que esta empresa vê. Use para mostrar como os clientes fazem os pedidos.'
+    : 'Dados fictícios. Nada do que você fizer aqui fica salvo no sistema real.';
+  $('botaoVerComoEmpresa').hidden = !(emTeste && usuario.perfil === 'admin' && usuario.proprietario);
+  $('botaoVoltarRestaurante').hidden = !simulando;
+  $('botaoVoltarRestaurante').classList.toggle('principal', simulando);
 
   document.querySelectorAll('[data-acao="modo-teste"]').forEach(function(botao) {
     botao.hidden = !(usuario.perfil === 'admin' && usuario.proprietario && !emTeste);
@@ -1339,6 +1359,111 @@ function sairModoTeste() {
       .then(function(resposta) {
         esconderCarregandoTela();
         trocarModo(resposta, 'Você voltou ao sistema real. O teste foi apagado.');
+      })
+      .catch(function(erro) {
+        esconderCarregandoTela();
+        avisar(erro.message, 'erro');
+      });
+  });
+}
+
+// ----------------------------------------------------------------
+// VER COMO EMPRESA (modo teste, somente o proprietário)
+// O sistema passa a mostrar a tela de uma empresa fictícia, para
+// apresentar o processo dos clientes. "Voltar ao restaurante" (ou
+// "Sair") retorna para a tela em que você estava.
+// ----------------------------------------------------------------
+let telaAntesDeVerComoEmpresa = '';
+
+function escolherEmpresaParaVer() {
+  $('menuConta').hidden = true;
+  fecharMenuCelular();
+
+  const corpo = el('div');
+  corpo.appendChild(el('p', 'texto-apoio',
+    'Escolha uma empresa. Você verá o sistema exatamente como o responsável dela vê: cardápio, pedido do dia, funcionários e avisos. ' +
+    'Tudo continua no modo teste.'));
+  const lista = el('div', 'lista-simular');
+  corpo.appendChild(lista);
+  mostrarCarregandoLista(lista, 3);
+  abrirModal('Ver como empresa', corpo, { pequeno: true });
+
+  terminarSalvamentos()
+    .then(function(pode) {
+      if (!pode) { fecharModal(); return null; }
+      return apiSessao('listarEmpresasParaSimular');
+    })
+    .then(function(empresas) {
+      if (!empresas) return;
+      lista.innerHTML = '';
+
+      if (!empresas.length) {
+        lista.appendChild(estadoVazio({ icone: 'empresa', titulo: 'Nenhuma empresa ativa', texto: 'Cadastre ou ative uma empresa em Empresas.' }));
+        return;
+      }
+
+      empresas.forEach(function(empresa) {
+        const opcao = el('button', 'opcao-simular');
+        opcao.type = 'button';
+        const avatar = el('span', 'avatar', iniciais(empresa.nome_empresa));
+        opcao.appendChild(avatar);
+        const textos = el('span', 'textos');
+        textos.appendChild(el('strong', '', empresa.nome_empresa));
+        textos.appendChild(el('span', '', empresa.tem_acesso
+          ? 'Responsável: ' + empresa.responsavel
+          : 'Sem acesso de responsável (crie em Empresas)'));
+        opcao.appendChild(textos);
+        opcao.disabled = !empresa.tem_acesso;
+        opcao.addEventListener('click', function() { verComoEmpresa(empresa); });
+        lista.appendChild(opcao);
+      });
+    })
+    .catch(function(erro) {
+      lista.innerHTML = '';
+      lista.appendChild(criarAlerta(erro.message, { icone: 'alerta' }));
+    });
+}
+
+function verComoEmpresa(empresa) {
+  fecharModal();
+  telaAntesDeVerComoEmpresa = estado.telaAtual || '';
+  mostrarCarregandoTela('Abrindo a visão de ' + empresa.nome_empresa + '…');
+
+  apiSessao('verComoEmpresa', empresa.empresa_id)
+    .then(function(resposta) {
+      esconderCarregandoTela();
+      apagar('tela_atual');   // a empresa começa pelo Início
+      trocarModo(resposta, 'Agora você está vendo o sistema como ' + empresa.nome_empresa + '.');
+    })
+    .catch(function(erro) {
+      esconderCarregandoTela();
+      avisar(erro.message, 'erro');
+    });
+}
+
+function voltarAoRestaurante() {
+  const pedidoNaoEnviado = typeof pedidoEmpresa !== 'undefined' && pedidoEmpresa.alterado;
+
+  const continuar = pedidoNaoEnviado
+    ? confirmar({
+        titulo: 'Voltar sem enviar o pedido?',
+        mensagem: 'As mudanças no pedido de hoje desta empresa ainda não foram enviadas.',
+        textoBotao: 'Voltar mesmo assim',
+        textoCancelar: 'Continuar aqui'
+      })
+    : Promise.resolve(true);
+
+  continuar.then(function(sim) {
+    if (!sim) return;
+    mostrarCarregandoTela('Voltando para a visão do restaurante…');
+
+    return api('voltarParaRestaurante', estado.token)
+      .then(function(resposta) {
+        esconderCarregandoTela();
+        if (telaAntesDeVerComoEmpresa) guardar('tela_atual', telaAntesDeVerComoEmpresa);
+        else apagar('tela_atual');
+        telaAntesDeVerComoEmpresa = '';
+        trocarModo(resposta, 'Você voltou para a visão do restaurante (ainda no modo teste).');
       })
       .catch(function(erro) {
         esconderCarregandoTela();

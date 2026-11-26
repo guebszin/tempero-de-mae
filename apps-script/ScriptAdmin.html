@@ -118,6 +118,7 @@ function atualizarSeletoresEmpresas() {
 TELAS['inicio-admin'] = { carregar: carregarInicioAdmin };
 
 function carregarInicioAdmin() {
+  if (typeof mostrarVersiculoInicio === 'function') mostrarVersiculoInicio();   // muda à meia-noite
   $('saudacaoAdmin').textContent = saudacaoDoHorario() + ', ' + primeiroNome(estado.usuario.nome) + '!';
   $('dataHojeAdmin').textContent = hojePorExtenso();
 

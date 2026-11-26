@@ -105,6 +105,10 @@ function sairModoTeste(token) {
   const sessao = validarSessao(token);
   if (!sessao.modo_teste) throw new Error('Você não está no modo teste.');
 
+  // Saindo enquanto vê como empresa: encerra também a sessão do restaurante
+  const donoId = sessao.simulacao ? sessao.simulacao.proprietario_id : sessao.usuario_id;
+  if (sessao.simulacao) CacheService.getScriptCache().remove(chaveSessao_(sessao.simulacao.token_restaurante));
+
   descartarTeste_(token);
 
   // Volta para a planilha real nesta execução
@@ -113,7 +117,7 @@ function sairModoTeste(token) {
   versaoDadosAtual_ = null;
   limparMemoriaExecucao_();
 
-  const usuario = lerUsuarios_().lista.find(u => u.usuario_id === sessao.usuario_id);
+  const usuario = lerUsuarios_().lista.find(u => u.usuario_id === donoId);
   if (!usuario || usuario.status !== 'ATIVO' || usuario.perfil !== 'admin' || !ehProprietario_(usuario.email)) {
     throw new Error('Sessão expirada. Faça login novamente.');
   }
@@ -125,6 +129,94 @@ function sairModoTeste(token) {
     token: aberta.token,
     usuario: comRecursos_(real),
     dados_iniciais: carregarDadosIniciais_(real)
+  };
+}
+
+// ----------------------------------------------------------------
+// VER COMO EMPRESA (só no modo teste)
+// O proprietário passa a usar o sistema como o responsável de uma
+// empresa fictícia, para mostrar o processo dos clientes. A sessão do
+// restaurante fica guardada para voltar depois.
+// ----------------------------------------------------------------
+function listarEmpresasParaSimular(token) {
+  const sessao = validarProprietario_(token);
+  if (!sessao.modo_teste) throw new Error('Disponível somente no modo teste.');
+
+  const usuarios = lerUsuarios_().lista;
+
+  return lerEmpresas_().lista
+    .filter(e => e.status === 'ATIVO')
+    .map(e => {
+      const responsavel = usuarios.find(u => u.perfil === 'empresa' && u.empresa_id === e.empresa_id && u.status === 'ATIVO');
+      return {
+        empresa_id: e.empresa_id,
+        nome_empresa: e.nome_empresa,
+        responsavel: responsavel ? responsavel.nome : '',
+        tem_acesso: !!responsavel
+      };
+    })
+    .sort((a, b) => a.nome_empresa.localeCompare(b.nome_empresa, 'pt-BR'));
+}
+
+function verComoEmpresa(token, empresaId) {
+  const sessao = validarProprietario_(token);
+  if (!sessao.modo_teste) throw new Error('Disponível somente no modo teste.');
+
+  const empresa = lerEmpresas_().lista.find(e => e.empresa_id === String(empresaId || ''));
+  if (!empresa) throw new Error('Empresa não encontrada.');
+  if (empresa.status !== 'ATIVO') throw new Error('Esta empresa está inativa. Ative-a em Empresas para ver como ela.');
+
+  const usuario = lerUsuarios_().lista.find(u => u.perfil === 'empresa' && u.empresa_id === empresa.empresa_id && u.status === 'ATIVO');
+  if (!usuario) throw new Error('Esta empresa ainda não tem acesso de responsável. Crie o acesso em Empresas.');
+
+  const sessaoEmpresa = {
+    usuario_id: usuario.usuario_id,
+    empresa_id: empresa.empresa_id,
+    nome: usuario.nome,
+    email: usuario.email,
+    login: usuario.login || '',
+    perfil: 'empresa',
+    nome_empresa: empresa.nome_empresa,
+    proprietario: false,
+    modo_teste: true,
+    simulacao: { token_restaurante: token, proprietario_id: sessao.usuario_id }
+  };
+
+  // A sessão do restaurante continua valendo (renovada) para a volta
+  const cache = CacheService.getScriptCache();
+  const guardada = cache.get(chaveSessao_(token));
+  if (guardada) cache.put(chaveSessao_(token), guardada, CONFIG.DURACAO_SESSAO_SEGUNDOS);
+
+  const tokenEmpresa = Utilities.getUuid() + Utilities.getUuid();
+  cache.put(chaveSessao_(tokenEmpresa), JSON.stringify(sessaoEmpresa), CONFIG.DURACAO_SESSAO_SEGUNDOS);
+
+  const atual = validarSessao(tokenEmpresa);
+
+  return {
+    token: tokenEmpresa,
+    usuario: comRecursos_(atual),
+    dados_iniciais: carregarDadosIniciais_(atual)
+  };
+}
+
+function voltarParaRestaurante(token) {
+  const sessao = validarSessao(token);
+  if (!sessao.simulacao) throw new Error('Você não está vendo como empresa.');
+
+  const tokenRestaurante = sessao.simulacao.token_restaurante;
+  const cache = CacheService.getScriptCache();
+  cache.remove(chaveSessao_(token));
+
+  const guardada = cache.get(chaveSessao_(tokenRestaurante));
+  if (!guardada) throw new Error('Sessão expirada. Faça login novamente.');
+  cache.put(chaveSessao_(tokenRestaurante), guardada, CONFIG.DURACAO_SESSAO_SEGUNDOS);
+
+  const restaurante = validarSessao(tokenRestaurante);
+
+  return {
+    token: tokenRestaurante,
+    usuario: comRecursos_(restaurante),
+    dados_iniciais: carregarDadosIniciais_(restaurante)
   };
 }
 

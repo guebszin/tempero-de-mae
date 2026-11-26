@@ -20,6 +20,7 @@ python3 teste_modo_teste.py
 | `teste_v20.py` | Dashboard, permissões de administradores, convites, descontos |
 | `teste_modo_teste.py` | Modo teste: dados fictícios, isolamento da planilha real, descarte |
 | `teste_v25.py` | Cardápio de segunda a domingo, dias fechados, prazo extra de 30 minutos e relatório financeiro por empresa |
+| `teste_v26.py` | Modo teste: "Ver como empresa" (entrar, telas da empresa, segurança, voltar, sair do teste) e versículo do dia no Início |
 | `teste_periodo_versiculo.py` | Dashboard com datas escolhidas no calendário e versículo do dia no login |
 | `teste_excluir_historico.py` / `teste_limpeza.py` | Exclusões do proprietário com histórico |
 | `teste_tema.py` | Tema claro, escuro e automático |

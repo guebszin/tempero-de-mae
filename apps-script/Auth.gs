@@ -307,6 +307,8 @@ function abrirSessao_(usuario, empresa) {
 // é lido de novo a cada entrada, para valer na hora o que o proprietário mudar.
 function comRecursos_(sessao) {
   const copia = JSON.parse(JSON.stringify(sessao));
+  // "Ver como empresa": o navegador só precisa saber que é uma simulação
+  if (copia.simulacao) copia.simulacao = true;
   try {
     copia.recursos = recursosDaSessao_(sessao);
   } catch (erro) {
@@ -452,22 +454,27 @@ function validarSessao(token) {
 
   const sessao = JSON.parse(dados);
 
+  // Sessão do modo teste: só o proprietário (conferido na planilha real);
+  // a partir daqui esta execução usa a planilha de teste.
+  // "Ver como empresa": a sessão é de uma empresa fictícia, mas quem está
+  // usando é o proprietário (simulacao.proprietario_id).
+  if (sessao.modo_teste && !bancoTesteAtivo_) {
+    const donoId = sessao.simulacao ? sessao.simulacao.proprietario_id : sessao.usuario_id;
+    const dono = lerUsuarios_().lista.find(u => u.usuario_id === donoId);
+
+    if (!dono || dono.status !== 'ATIVO' || dono.perfil !== 'admin' || !ehProprietario_(dono.email)) {
+      CacheService.getScriptCache().remove(chaveSessao_(token));
+      throw new Error('Sessão expirada. Faça login novamente.');
+    }
+    ativarBancoTeste_();
+  }
+
   // Quem foi desativado ou removido perde o acesso na hora
   const usuario = lerUsuarios_().lista.find(u => u.usuario_id === sessao.usuario_id);
 
   if (!usuario || usuario.status !== 'ATIVO') {
     CacheService.getScriptCache().remove(chaveSessao_(token));
     throw new Error('Sessão expirada. Seu acesso foi desativado ou removido.');
-  }
-
-  // Sessão do modo teste: só o proprietário; a partir daqui esta
-  // execução usa a planilha de teste
-  if (sessao.modo_teste && !bancoTesteAtivo_) {
-    if (usuario.perfil !== 'admin' || !ehProprietario_(usuario.email)) {
-      CacheService.getScriptCache().remove(chaveSessao_(token));
-      throw new Error('Sessão expirada. Faça login novamente.');
-    }
-    ativarBancoTeste_();
   }
 
   if (sessao.perfil === 'admin') {
@@ -506,7 +513,11 @@ function encerrarSessao(token, lembrete) {
   // Saindo da conta no modo teste: o teste também é apagado
   if (token) {
     const dados = lerJson_(CacheService.getScriptCache().get(chaveSessao_(token)));
-    if (dados && dados.modo_teste) descartarTeste_(token);
+    if (dados && dados.modo_teste) {
+      // Vendo como empresa: a sessão do restaurante (de teste) também acaba
+      if (dados.simulacao) CacheService.getScriptCache().remove(chaveSessao_(dados.simulacao.token_restaurante));
+      descartarTeste_(token);
+    }
   }
 
   if (token) CacheService.getScriptCache().remove(chaveSessao_(token));
