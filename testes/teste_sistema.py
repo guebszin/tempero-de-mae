@@ -162,7 +162,9 @@ async def main():
         try: await pg.wait_for_function("document.getElementById('toasts').innerText.indexOf('precisa ter {link}')>=0", timeout=10000)
         except Exception: pass
         ok(await pg.locator('#toasts').inner_text()!='' and 'precisa ter {link}' in await pg.locator('#toasts').inner_text(), 'exige {link} na mensagem')
-        await txt.fill('Oi {responsavel}! Crie sua senha da {empresa}: {link} (usuário {usuario})'); await pg.click('button:has-text("Salvar mensagem")'); await pg.wait_for_timeout(800)
+        await txt.fill('Oi {responsavel}! Crie sua senha da {empresa}: {link} (usuário {usuario})'); await pg.click('button:has-text("Salvar mensagem")')
+        try: await pg.wait_for_function("(document.getElementById('servidor').contentWindow.localStorage.getItem('abas')||'').indexOf('Crie sua senha da {empresa}')>=0", timeout=10000)
+        except Exception: pass
         c=await pg.evaluate(chamar(ADM+"const e=w.listarEmpresas(tk).find(x=>x.nome_empresa==='Padaria Sol'); w.__novaExecucao(); return w.gerarConviteEmpresa(tk,e.empresa_id)"))
         ok(c['nova_senha'] and 'nova senha' in c['mensagem'], 'empresa ativa recebe link de nova senha')
         await pg.evaluate(chamar(ADM+"""const e=w.listarEmpresas(tk).find(x=>x.nome_empresa==='Padaria Sol'); w.__novaExecucao(); w.criarEmpresa(tk,{nome:'Beta Ltda',email:'b@b.com',login:'beta',responsavel:'Rui'}); return 1"""))

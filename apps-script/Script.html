@@ -8,7 +8,10 @@
 const estado = {
   token: null,
   usuario: null,
-  telaAtual: null
+  telaAtual: null,
+  // Muda ao sair da conta e ao entrar/sair do modo teste: respostas de
+  // chamadas feitas antes disso são ignoradas (eram de outra sessão)
+  geracao: 0
 };
 
 // Tamanho mínimo de senha (o servidor confere de novo)
@@ -194,10 +197,18 @@ function normalizarBusca(texto) {
 function api(funcao) {
   const argumentos = Array.prototype.slice.call(arguments, 1);
 
+  const geracao = estado.geracao;
+
   return new Promise(function(resolver, rejeitar) {
     const executor = google.script.run
-      .withSuccessHandler(resolver)
+      .withSuccessHandler(function(resposta) {
+        // Resposta de uma sessão que já foi trocada: não mistura os dados
+        if (geracao !== estado.geracao) return;
+        resolver(resposta);
+      })
       .withFailureHandler(function(erro) {
+        if (geracao !== estado.geracao) return;
+
         // O Google às vezes coloca "Error: " na frente da mensagem
         const mensagem = String((erro && erro.message) ? erro.message : erro)
           .replace(/^(Exception|Error|Erro|TypeError):\s*/i, '');
@@ -1222,6 +1233,7 @@ function encerrarNoAparelho() {
 // Apaga da memória e da tela os dados de quem estava usando
 // (ao sair da conta e ao entrar ou sair do modo teste)
 function limparDadosDaTela() {
+  estado.geracao++;
   estado.token = null;
   estado.usuario = null;
   estado.telaAtual = null;

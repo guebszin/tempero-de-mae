@@ -13,3 +13,4 @@ testes/__pycache__/
 # Sistema
 .DS_Store
 Thumbs.db
+testes/v[0-9]*/
