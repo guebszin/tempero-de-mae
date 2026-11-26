@@ -157,6 +157,16 @@ async def main():
         ok(await pg.locator('#menuLateral [data-tela=cobrancas]').count()==1, 'religado: Cobranças volta')
 
         # ---------- 7. MENSAGEM DO CONVITE PERSONALIZADA ----------
+        # Espera a tela de Configurações terminar de se redesenhar (depois de religar o módulo)
+        await pg.evaluate("""new Promise(function(fim){
+            let antes=null, iguais=0, voltas=0;
+            const t=setInterval(function(){
+              const atual=document.querySelector('#configuracoesConteudo textarea');
+              iguais = (atual && atual===antes && !document.querySelector('#configuracoesConteudo .spinner-pequeno')) ? iguais+1 : 0;
+              antes=atual; voltas++;
+              if (iguais>=6 || voltas>100) { clearInterval(t); fim(); }
+            }, 250);
+          })""")
         txt=pg.locator('#configuracoesConteudo textarea')
         await txt.fill('Oi {responsavel}, sem link aqui'); await pg.click('button:has-text("Salvar mensagem")')
         try: await pg.wait_for_function("document.getElementById('toasts').innerText.indexOf('precisa ter {link}')>=0", timeout=10000)

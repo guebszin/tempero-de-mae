@@ -19,6 +19,7 @@ python3 teste_modo_teste.py
 | `teste_cobrancas.py` | Cobranças, ciclos, pagamentos parciais, extrato |
 | `teste_v20.py` | Dashboard, permissões de administradores, convites, descontos |
 | `teste_modo_teste.py` | Modo teste: dados fictícios, isolamento da planilha real, descarte |
+| `teste_periodo_versiculo.py` | Dashboard com datas escolhidas no calendário e versículo do dia no login |
 | `teste_excluir_historico.py` / `teste_limpeza.py` | Exclusões do proprietário com histórico |
 | `teste_tema.py` | Tema claro, escuro e automático |
 

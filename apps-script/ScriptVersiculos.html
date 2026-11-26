@@ -1,0 +1,85 @@
+<script>
+// ================================================================
+// VERSÍCULO DO DIA (tela de entrada)
+// Um versículo por dia, acima do quadro de login. Muda à meia-noite
+// (horário do aparelho) e segue uma ordem embaralhada, para dias
+// seguidos não repetirem versículos parecidos.
+// Texto: redação tradicional da tradução de João Ferreira de Almeida.
+// Para trocar ou acrescentar versículos, basta editar a lista abaixo
+// ([texto, referência]).
+// ================================================================
+const VERSICULOS = [
+  ['Até aqui nos ajudou o Senhor.', '1 Samuel 7:12'],
+  ['O Senhor é o meu pastor; nada me faltará.', 'Salmos 23:1'],
+  ['Tudo posso naquele que me fortalece.', 'Filipenses 4:13'],
+  ['Entrega o teu caminho ao Senhor; confia nele, e ele tudo fará.', 'Salmos 37:5'],
+  ['Deleita-te também no Senhor, e te concederá os desejos do teu coração.', 'Salmos 37:4'],
+  ['Lâmpada para os meus pés é tua palavra, e luz para o meu caminho.', 'Salmos 119:105'],
+  ['O choro pode durar uma noite, mas a alegria vem pela manhã.', 'Salmos 30:5'],
+  ['Este é o dia que fez o Senhor; regozijemo-nos, e alegremo-nos nele.', 'Salmos 118:24'],
+  ['Bendize, ó minha alma, ao Senhor, e não te esqueças de nenhum de seus benefícios.', 'Salmos 103:2'],
+  ['Confia no Senhor de todo o teu coração, e não te estribes no teu próprio entendimento.', 'Provérbios 3:5'],
+  ['Confia ao Senhor as tuas obras, e teus pensamentos serão estabelecidos.', 'Provérbios 16:3'],
+  ['Esforça-te, e tem bom ânimo; não temas, nem te espantes; porque o Senhor teu Deus é contigo, por onde quer que andares.', 'Josué 1:9'],
+  ['Os que esperam no Senhor renovarão as forças, subirão com asas como águias; correrão, e não se cansarão; caminharão, e não se fatigarão.', 'Isaías 40:31'],
+  ['Não temas, porque eu sou contigo; não te assombres, porque eu sou teu Deus.', 'Isaías 41:10'],
+  ['Vinde a mim, todos os que estais cansados e oprimidos, e eu vos aliviarei.', 'Mateus 11:28'],
+  ['Buscai primeiro o reino de Deus, e a sua justiça, e todas estas coisas vos serão acrescentadas.', 'Mateus 6:33'],
+  ['Todas as coisas contribuem juntamente para o bem daqueles que amam a Deus.', 'Romanos 8:28'],
+  ['Se Deus é por nós, quem será contra nós?', 'Romanos 8:31'],
+  ['Lançando sobre ele toda a vossa ansiedade, porque ele tem cuidado de vós.', '1 Pedro 5:7'],
+  ['Tudo quanto fizerdes, fazei-o de todo o coração, como ao Senhor.', 'Colossenses 3:23'],
+  ['Regozijai-vos sempre no Senhor; outra vez digo, regozijai-vos.', 'Filipenses 4:4'],
+  ['Em tudo dai graças, porque esta é a vontade de Deus em Cristo Jesus para convosco.', '1 Tessalonicenses 5:18'],
+  ['O Senhor te abençoe e te guarde.', 'Números 6:24'],
+  ['Eu sou o caminho, e a verdade, e a vida.', 'João 14:6'],
+  ['Eu sou o pão da vida; aquele que vem a mim não terá fome.', 'João 6:35'],
+  ['O pão nosso de cada dia nos dá hoje.', 'Mateus 6:11'],
+  ['Provai, e vede que o Senhor é bom.', 'Salmos 34:8'],
+  ['Deus é o nosso refúgio e fortaleza, socorro bem presente na angústia.', 'Salmos 46:1'],
+  ['Grandes coisas fez o Senhor por nós, pelas quais estamos alegres.', 'Salmos 126:3'],
+  ['Ainda que eu andasse pelo vale da sombra da morte, não temeria mal algum, porque tu estás comigo.', 'Salmos 23:4'],
+  ['O Senhor é a minha luz e a minha salvação; a quem temerei?', 'Salmos 27:1'],
+  ['Clama a mim, e responder-te-ei.', 'Jeremias 33:3'],
+  ['A minha graça te basta, porque o meu poder se aperfeiçoa na fraqueza.', '2 Coríntios 12:9'],
+  ['Aquietai-vos, e sabei que eu sou Deus.', 'Salmos 46:10'],
+  ['Ensina-nos a contar os nossos dias, de tal maneira que alcancemos corações sábios.', 'Salmos 90:12'],
+  ['Pois comerás do trabalho das tuas mãos; feliz serás, e te irá bem.', 'Salmos 128:2'],
+  ['Melhor é a comida de hortaliça onde há amor do que o boi gordo e com ele o ódio.', 'Provérbios 15:17'],
+  ['Quer comais, quer bebais, ou façais outra qualquer coisa, fazei tudo para glória de Deus.', '1 Coríntios 10:31'],
+  ['As misericórdias do Senhor são a causa de não sermos consumidos; novas são cada manhã.', 'Lamentações 3:22-23'],
+  ['Bem-aventurados os pacificadores, porque eles serão chamados filhos de Deus.', 'Mateus 5:9'],
+  ['Dai, e ser-vos-á dado.', 'Lucas 6:38'],
+  ['Tudo tem o seu tempo determinado, e há tempo para todo o propósito debaixo do céu.', 'Eclesiastes 3:1'],
+  ['O Senhor pelejará por vós, e vos calareis.', 'Êxodo 14:14'],
+  ['Os céus declaram a glória de Deus, e o firmamento anuncia a obra das suas mãos.', 'Salmos 19:1'],
+  ['Sede uns para com os outros benignos, misericordiosos, perdoando-vos uns aos outros.', 'Efésios 4:32'],
+  ['O amor é sofredor, é benigno.', '1 Coríntios 13:4'],
+  ['O coração alegre aformoseia o rosto.', 'Provérbios 15:13'],
+  ['Mais bem-aventurada coisa é dar do que receber.', 'Atos 20:35'],
+  ['Sede fortes, e revista-se de ânimo o vosso coração, vós todos que esperais no Senhor.', 'Salmos 31:24'],
+  ['O Senhor é bom, uma fortaleza no dia da angústia, e conhece os que confiam nele.', 'Naum 1:7']
+];
+
+// Número do dia (muda à meia-noite) → posição na lista.
+// Multiplicar por 7 (que não divide o tamanho da lista) passa por todos
+// os versículos antes de repetir, sem seguir a ordem da lista.
+function versiculoDoDia(data) {
+  data = data || new Date();
+  const dia = Math.floor(Date.UTC(data.getFullYear(), data.getMonth(), data.getDate()) / 86400000);
+  const total = VERSICULOS.length;
+  const passo = total % 7 === 0 ? 11 : 7;
+  return VERSICULOS[((dia * passo) % total + total) % total];
+}
+
+function mostrarVersiculoDoDia() {
+  const caixa = $('versiculoDia');
+  if (!caixa) return;
+  const versiculo = versiculoDoDia();
+  $('versiculoTexto').textContent = versiculo[0];
+  $('versiculoReferencia').textContent = versiculo[1];
+  caixa.hidden = false;
+}
+
+mostrarVersiculoDoDia();
+</script>

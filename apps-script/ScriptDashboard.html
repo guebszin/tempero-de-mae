@@ -7,14 +7,29 @@
 // ================================================================
 const dashboard = {
   periodo: 'ESTE_MES',
-  dados: {},        // { periodo: { dados, em } }
+  inicio: '',             // datas escolhidas no calendário (PERSONALIZADO)
+  fim: '',
+  escolhendoDatas: false, // aba "Escolher datas" aberta, ainda sem aplicar
+  dados: {},              // { chave do período: { dados, em } }
   pedidoAtual: 0
 };
 
+const PERIODO_DATAS = 'PERSONALIZADO';
+const MAXIMO_DIAS_DASHBOARD = 366;
+
 AO_SAIR.push(function() {
   dashboard.periodo = 'ESTE_MES';
+  dashboard.inicio = '';
+  dashboard.fim = '';
+  dashboard.escolhendoDatas = false;
   dashboard.dados = {};
 });
+
+function chaveDashboard() {
+  return dashboard.periodo === PERIODO_DATAS
+    ? PERIODO_DATAS + '|' + dashboard.inicio + '|' + dashboard.fim
+    : dashboard.periodo;
+}
 
 TELAS['dashboard'] = { carregar: carregarDashboard };
 
@@ -28,8 +43,8 @@ const CORES_SITUACAO = {
 };
 
 function carregarDashboard() {
-  const periodo = dashboard.periodo;
-  const guardado = dashboard.dados[periodo];
+  const chave = chaveDashboard();
+  const guardado = dashboard.dados[chave];
   const conteudo = $('dashboardConteudo');
 
   if (guardado) renderizarDashboard(guardado.dados);
@@ -38,9 +53,11 @@ function carregarDashboard() {
   if (guardado && recente(guardado.em)) return;
 
   const pedido = ++dashboard.pedidoAtual;
-  apiSessao('obterDashboard', periodo)
+  const datas = dashboard.periodo === PERIODO_DATAS ? [dashboard.inicio, dashboard.fim] : [];
+
+  apiSessao.apply(null, ['obterDashboard', dashboard.periodo].concat(datas))
     .then(function(dados) {
-      dashboard.dados[periodo] = { dados: dados, em: Date.now() };
+      dashboard.dados[chave] = { dados: dados, em: Date.now() };
       if (pedido !== dashboard.pedidoAtual || estado.telaAtual !== 'dashboard') return;
       renderizarDashboard(dados);
     })
@@ -58,13 +75,30 @@ function renderizarDashboard(d) {
   const ferramentas = el('div', 'ferramentas dashboard-ferramentas');
   const abas = el('div', 'abas-relatorio');
   abas.setAttribute('role', 'tablist');
+  const abaAtiva = dashboard.escolhendoDatas ? PERIODO_DATAS : d.periodo;
   Object.keys(d.periodos).forEach(function(chave) {
-    const botao = el('button', 'aba-relatorio' + (chave === d.periodo ? ' ativa' : ''), d.periodos[chave]);
+    const ativa = chave === abaAtiva;
+    const botao = el('button', 'aba-relatorio' + (ativa ? ' ativa' : '') + (chave === PERIODO_DATAS ? ' aba-datas' : ''));
+    if (chave === PERIODO_DATAS) {
+      const marca = el('span');
+      marca.innerHTML = icone('calendario');
+      botao.appendChild(marca.firstChild);
+    }
+    botao.appendChild(document.createTextNode(d.periodos[chave]));
     botao.type = 'button';
     botao.setAttribute('role', 'tab');
-    botao.setAttribute('aria-selected', chave === d.periodo ? 'true' : 'false');
+    botao.setAttribute('aria-selected', ativa ? 'true' : 'false');
     botao.addEventListener('click', function() {
-      if (dashboard.periodo === chave) return;
+      if (chave === PERIODO_DATAS) {
+        // Abre o calendário com as datas que estão na tela
+        dashboard.escolhendoDatas = true;
+        renderizarDashboard(d);
+        const campo = $('dashboardInicio');
+        if (campo) campo.focus();
+        return;
+      }
+      dashboard.escolhendoDatas = false;
+      if (dashboard.periodo === chave) { renderizarDashboard(d); return; }
       dashboard.periodo = chave;
       carregarDashboard();
     });
@@ -73,6 +107,10 @@ function renderizarDashboard(d) {
   ferramentas.appendChild(abas);
   ferramentas.appendChild(el('span', 'dashboard-periodo', textoPeriodo(d.inicio, d.fim)));
   conteudo.appendChild(ferramentas);
+
+  if (dashboard.escolhendoDatas || d.periodo === PERIODO_DATAS) {
+    conteudo.appendChild(criarEscolhaDatas(d));
+  }
 
   // Números principais
   const indicadores = el('div', 'grade-indicadores quatro');
@@ -128,6 +166,61 @@ function renderizarDashboard(d) {
   conteudo.appendChild(grade);
 
   preencherIcones(conteudo);
+}
+
+// "De [data] Até [data] [Aplicar]": o campo de data abre o calendário
+function criarEscolhaDatas(d) {
+  const formulario = el('form', 'cartao dashboard-datas');
+  formulario.noValidate = true;
+
+  function campoData(id, rotulo, valor) {
+    const bloco = el('div', 'campo campo-data');
+    const etiqueta = el('label', '', rotulo);
+    etiqueta.htmlFor = id;
+    const entrada = el('input');
+    entrada.type = 'date';
+    entrada.id = id;
+    entrada.required = true;
+    entrada.value = valor || '';
+    bloco.appendChild(etiqueta);
+    bloco.appendChild(entrada);
+    return { bloco: bloco, entrada: entrada };
+  }
+
+  const inicio = campoData('dashboardInicio', 'De', dashboard.inicio || d.inicio);
+  const fim = campoData('dashboardFim', 'Até', dashboard.fim || d.fim);
+  fim.entrada.min = inicio.entrada.value;
+  inicio.entrada.addEventListener('change', function() {
+    fim.entrada.min = inicio.entrada.value;
+    if (fim.entrada.value && fim.entrada.value < inicio.entrada.value) fim.entrada.value = inicio.entrada.value;
+  });
+
+  const aplicar = criarBotao('Ver período', { classe: 'botao-primario', icone: 'pizza' });
+  aplicar.type = 'submit';
+
+  formulario.appendChild(inicio.bloco);
+  formulario.appendChild(fim.bloco);
+  formulario.appendChild(aplicar);
+
+  formulario.addEventListener('submit', function(evento) {
+    evento.preventDefault();
+    const de = inicio.entrada.value;
+    const ate = fim.entrada.value;
+
+    if (!de || !ate) { avisar('Escolha a data inicial e a data final.', 'erro'); return; }
+    if (ate < de) { avisar('A data final precisa ser igual ou depois da data inicial.', 'erro'); return; }
+
+    const dias = Math.round((new Date(ate + 'T12:00:00') - new Date(de + 'T12:00:00')) / 86400000) + 1;
+    if (dias > MAXIMO_DIAS_DASHBOARD) { avisar('Escolha um período de até 1 ano.', 'erro'); return; }
+
+    dashboard.periodo = PERIODO_DATAS;
+    dashboard.inicio = de;
+    dashboard.fim = ate;
+    dashboard.escolhendoDatas = false;
+    carregarDashboard();
+  });
+
+  return formulario;
 }
 
 function numeroBR(n) {

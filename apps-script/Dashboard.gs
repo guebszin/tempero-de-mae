@@ -11,22 +11,36 @@ const PERIODOS_DASHBOARD = {
   ESTE_ANO: 'Este ano'
 };
 
+// Período escolhido no calendário ("de tal dia até tal dia")
+const PERIODO_PERSONALIZADO = 'PERSONALIZADO';
+const TEXTO_PERIODO_PERSONALIZADO = 'Escolher datas';
+
 const FATIAS_DASHBOARD = 5;   // as 5 maiores + "Outras"
 
-function obterDashboard(token, periodo) {
+// periodo: uma das chaves acima ou PERSONALIZADO (com inicio e fim aaaa-mm-dd)
+function obterDashboard(token, periodo, inicio, fim) {
   exigirTela_(token, 'dashboard');
 
-  periodo = PERIODOS_DASHBOARD[periodo] ? periodo : 'ESTE_MES';
   const fuso = Session.getScriptTimeZone();
   const hoje = hojeTexto_(fuso);
-  const intervalo = intervaloDashboard_(periodo, hoje);
+  let intervalo;
+
+  if (periodo === PERIODO_PERSONALIZADO) {
+    intervalo = intervaloPersonalizado_(inicio, fim);
+  } else {
+    periodo = PERIODOS_DASHBOARD[periodo] ? periodo : 'ESTE_MES';
+    intervalo = intervaloDashboard_(periodo, hoje);
+  }
+
+  const periodos = Object.assign({}, PERIODOS_DASHBOARD);
+  periodos[PERIODO_PERSONALIZADO] = TEXTO_PERIODO_PERSONALIZADO;
 
   const relatorio = montarRelatorio_(intervalo.inicio, intervalo.fim, '', null);
   const empresas = relatorio.por_empresa;
 
   return {
     periodo: periodo,
-    periodos: PERIODOS_DASHBOARD,
+    periodos: periodos,
     inicio: intervalo.inicio,
     fim: intervalo.fim,
     totais: {
@@ -41,6 +55,21 @@ function obterDashboard(token, periodo) {
     proteinas: agruparFatias_(relatorio.por_proteina.map(p => ({ nome: p.nome, valor: p.quentinhas }))),
     situacao: moduloCobrancasAtivo_() ? situacaoDoValor_(intervalo.inicio, intervalo.fim, hoje) : null
   };
+}
+
+// Confere as datas escolhidas (mesmas regras do relatório: até 1 ano)
+function intervaloPersonalizado_(inicio, fim) {
+  if (!inicio || !fim) throw new Error('Escolha a data inicial e a data final.');
+
+  inicio = validarDataFormulario_(inicio);
+  fim = validarDataFormulario_(fim);
+
+  if (fim < inicio) throw new Error('A data final precisa ser igual ou depois da data inicial.');
+
+  const dias = Math.round((converterDataFormulario(fim) - converterDataFormulario(inicio)) / 86400000) + 1;
+  if (dias > MAXIMO_DIAS_RELATORIO) throw new Error('Escolha um período de até 1 ano.');
+
+  return { inicio: inicio, fim: fim };
 }
 
 function intervaloDashboard_(periodo, hoje) {

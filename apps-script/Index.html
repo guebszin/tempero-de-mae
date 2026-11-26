@@ -39,6 +39,14 @@
      ============================================================ -->
 <div id="telaLogin" class="tela-login" hidden>
   <div class="fundo-animado" aria-hidden="true" data-fundo-animado></div>
+
+  <!-- Versículo do dia (muda todos os dias) -->
+  <figure class="versiculo-dia" id="versiculoDia" hidden>
+    <span class="versiculo-rotulo">Versículo do dia</span>
+    <blockquote id="versiculoTexto"></blockquote>
+    <figcaption id="versiculoReferencia"></figcaption>
+  </figure>
+
   <div class="login-card">
 
     <div class="marca">
@@ -1050,6 +1058,7 @@
 </template>
 
 <?!= incluir('Script'); ?>
+<?!= incluir('ScriptVersiculos'); ?>
 <?!= incluir('ScriptAdmin'); ?>
 <?!= incluir('ScriptEmpresa'); ?>
 <?!= incluir('ScriptCardapios'); ?>

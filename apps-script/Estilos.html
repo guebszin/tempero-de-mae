@@ -301,6 +301,61 @@
       var(--fundo);
   }
 
+  /* Tela de entrada: versículo do dia acima do quadro */
+  #telaLogin { align-content: center; gap: 18px; }
+
+  .versiculo-dia {
+    position: relative;
+    width: 100%;
+    max-width: 400px;
+    margin: 0;
+    text-align: center;
+    animation: entrarVersiculo .9s cubic-bezier(.2, .8, .2, 1) both;
+  }
+
+  .versiculo-rotulo {
+    display: inline-block;
+    margin-bottom: 8px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: var(--verde-claro);
+    color: var(--verde-escuro);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+  }
+
+  .versiculo-dia blockquote {
+    margin: 0;
+    color: var(--texto);
+    font-size: 17px;
+    font-style: italic;
+    font-weight: 500;
+    line-height: 1.45;
+    text-wrap: balance;
+  }
+
+  .versiculo-dia blockquote::before { content: '\201C'; }
+  .versiculo-dia blockquote::after { content: '\201D'; }
+
+  .versiculo-dia figcaption {
+    margin-top: 6px;
+    color: var(--verde-escuro);
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  @keyframes entrarVersiculo {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  @media (max-width: 520px) {
+    #telaLogin { gap: 14px; }
+    .versiculo-dia blockquote { font-size: 15px; }
+  }
+
   .login-card {
     position: relative;
     width: 100%;
@@ -453,7 +508,7 @@
 
   /* Quem pediu menos movimento no aparelho vê o fundo parado */
   @media (prefers-reduced-motion: reduce) {
-    .mancha, .icone-flutuante, .icone-flutuante svg, .vapor, .login-card { animation: none !important; }
+    .mancha, .icone-flutuante, .icone-flutuante svg, .vapor, .login-card, .versiculo-dia { animation: none !important; }
     .icone-flutuante { opacity: .7; transform: translateY(calc(-1 * var(--parado, 40vh))); }
     .vapor { display: none; }
   }
@@ -2346,9 +2401,27 @@
   /* ===== DASHBOARD ===== */
   .dashboard-ferramentas { align-items: center; gap: 12px; flex-wrap: wrap; }
   .dashboard-periodo { color: var(--texto-suave); font-size: 13px; }
+  .aba-datas { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+  .aba-datas svg { width: 16px; height: 16px; }
+
+  /* Escolher datas: De / Até / botão numa linha */
+  .dashboard-datas {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+  }
+  .dashboard-datas .campo { margin: 0; flex: 0 1 190px; }
+  .dashboard-datas .botao { height: 42px; }
+
   @media (max-width: 520px) {
     .dashboard-ferramentas .abas-relatorio { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
     .dashboard-ferramentas .aba-relatorio { text-align: center; }
+    .dashboard-ferramentas .aba-datas { grid-column: 1 / -1; }
+    .dashboard-datas .campo { flex: 1 1 130px; }
+    .dashboard-datas .botao { width: 100%; justify-content: center; }
   }
 
   .grade-graficos {
