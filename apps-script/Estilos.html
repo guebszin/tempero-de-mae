@@ -409,6 +409,51 @@
     to   { opacity: 1; transform: none; }
   }
 
+  /* ---------- ASSINATURA (login e Início) ---------- */
+  .assinatura {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    color: var(--texto-suave);
+    font-size: 12px;
+    letter-spacing: .02em;
+    opacity: .72;
+    transition: opacity .25s ease;
+    user-select: none;
+  }
+
+  .assinatura:hover { opacity: 1; }
+
+  .assinatura strong {
+    font-weight: 600;
+    letter-spacing: .01em;
+    background: linear-gradient(90deg, var(--verde), var(--verde-escuro));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .assinatura-marca {
+    width: 18px;
+    height: 2px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, transparent, var(--verde));
+  }
+
+  .tela-login .assinatura { animation: entrarVersiculo 1.1s .25s cubic-bezier(.2, .8, .2, 1) both; }
+
+  .assinatura-inicio {
+    display: flex;
+    justify-content: center;
+    margin-top: 28px;
+    padding-bottom: 4px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tela-login .assinatura { animation: none; }
+  }
+
   /* ---------- FUNDO ANIMADO DO LOGIN ----------
      Três manchas de cor que flutuam devagar + ícones de cozinha
      subindo. Só transform/opacity (leve no celular). */
