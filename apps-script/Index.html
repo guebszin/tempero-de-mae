@@ -40,49 +40,61 @@
 <div id="telaLogin" class="tela-login" hidden>
   <div class="fundo-animado" aria-hidden="true" data-fundo-animado></div>
 
-  <!-- Versículo do dia (muda todos os dias) -->
-  <figure class="versiculo-dia" id="versiculoDia" hidden>
-    <span class="versiculo-rotulo">Versículo do dia</span>
-    <blockquote id="versiculoTexto"></blockquote>
-    <figcaption id="versiculoReferencia"></figcaption>
-  </figure>
+  <div class="painel-login">
 
-  <div class="login-card">
-
-    <div class="logo-entrada">
-      <img data-logo="completo" alt="Tempero de Mãe" width="180" height="155">
-    </div>
-
-    <h1>Entrar</h1>
-    <p class="texto-apoio">Use o usuário e a senha cadastrados.</p>
-
-    <form id="formLogin" novalidate>
-      <div id="erroLogin" class="mensagem-erro" hidden></div>
-
-      <div class="campo">
-        <label for="loginEmail">Usuário</label>
-        <input id="loginEmail" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Seu usuário" required>
+    <!-- Lado da marca: logo e versículo do dia -->
+    <aside class="painel-marca">
+      <div class="logo-entrada">
+        <img data-logo="completo" alt="Tempero de Mãe" width="220" height="190">
       </div>
+      <p class="painel-marca-frase">Pedidos de quentinhas para empresas</p>
 
-      <div class="campo">
-        <label for="loginSenha">Senha</label>
-        <div class="campo-senha">
-          <input id="loginSenha" type="password" autocomplete="current-password" placeholder="Sua senha" required>
-          <button type="button" class="botao-icone" data-mostrar-senha="loginSenha" title="Mostrar senha" data-icone="olho"></button>
+      <!-- Versículo do dia (muda todos os dias) -->
+      <figure class="versiculo-dia" id="versiculoDia" hidden>
+        <span class="versiculo-rotulo">Versículo do dia</span>
+        <blockquote id="versiculoTexto"></blockquote>
+        <figcaption id="versiculoReferencia"></figcaption>
+      </figure>
+    </aside>
+
+    <!-- Lado do formulário -->
+    <div class="login-card">
+      <span class="login-sobretitulo">Acesso ao sistema</span>
+      <h1>Entrar</h1>
+      <p class="texto-apoio">Use o usuário e a senha cadastrados.</p>
+
+      <form id="formLogin" novalidate>
+        <div id="erroLogin" class="mensagem-erro" hidden></div>
+
+        <div class="campo">
+          <label for="loginEmail">Usuário</label>
+          <div class="campo-com-icone">
+            <span class="campo-icone" data-icone="cliente" aria-hidden="true"></span>
+            <input id="loginEmail" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Seu usuário" required>
+          </div>
         </div>
-      </div>
 
-      <label class="lembrar-login">
-        <input id="loginLembrar" type="checkbox" checked>
-        <span>Manter conectado até o fim do dia</span>
-      </label>
+        <div class="campo">
+          <label for="loginSenha">Senha</label>
+          <div class="campo-senha campo-com-icone">
+            <span class="campo-icone" data-icone="chave" aria-hidden="true"></span>
+            <input id="loginSenha" type="password" autocomplete="current-password" placeholder="Sua senha" required>
+            <button type="button" class="botao-icone" data-mostrar-senha="loginSenha" title="Mostrar senha" data-icone="olho"></button>
+          </div>
+        </div>
 
-      <button type="submit" class="botao botao-primario botao-largo">Entrar</button>
-    </form>
+        <label class="lembrar-login">
+          <input id="loginLembrar" type="checkbox" checked>
+          <span>Manter conectado até o fim do dia</span>
+        </label>
 
-    <p class="login-ajuda">Esqueceu a senha? Fale com o restaurante.</p>
+        <button type="submit" class="botao botao-primario botao-largo botao-entrar">Entrar</button>
+      </form>
 
-    <div class="bloco-tema" data-seletor-tema></div>
+      <p class="login-ajuda">Esqueceu a senha? Fale com o restaurante.</p>
+
+      <div class="bloco-tema" data-seletor-tema></div>
+    </div>
   </div>
 
   <p class="assinatura"><span class="assinatura-marca" aria-hidden="true"></span><span>Feito por <strong>Luis Guilherme Wermelinger</strong></span></p>

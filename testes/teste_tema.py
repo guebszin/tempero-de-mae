@@ -19,7 +19,7 @@ async def main():
         await pg.goto('http://localhost:8765/index.html'); await pg.evaluate("localStorage.clear(); sessionStorage.clear()")
         await pg.goto('http://localhost:8765/index.html'); await pg.wait_for_selector('#telaLogin:not([hidden])')
         ok(await pg.evaluate(TEMA)=='escuro', 'automático segue aparelho escuro')
-        ok(await pg.evaluate(FUNDO)=='rgb(14, 19, 17)', 'fundo escuro: '+await pg.evaluate(FUNDO))
+        ok(await pg.evaluate(FUNDO)=='rgb(20, 16, 11)', 'fundo escuro (marrom, v30): '+await pg.evaluate(FUNDO))
         ok(await pg.locator('#telaLogin .seletor-tema button.ativo[data-tema=auto]').count()==1, 'login mostra Auto marcado')
         await pg.screenshot(path='v15/t1_login_escuro.png')
         await pg.click('#telaLogin .seletor-tema button[data-tema=claro]')
@@ -46,7 +46,7 @@ async def main():
         # menu da conta (topo)
         await pg.click('#sidebar .seletor-tema button[data-tema=claro]')
         ok(await pg.evaluate(TEMA)=='claro', 'voltar para claro pelo menu lateral')
-        ok(await pg.evaluate(FUNDO)=='rgb(245, 246, 244)', 'fundo claro original: '+await pg.evaluate(FUNDO))
+        ok(await pg.evaluate(FUNDO)=='rgb(247, 243, 236)', 'fundo claro (creme, v30): '+await pg.evaluate(FUNDO))
         await pg.screenshot(path='v15/t6_inicio_claro.png')
         # impressão continua clara
         await pg.click('#sidebar .seletor-tema button[data-tema=escuro]')

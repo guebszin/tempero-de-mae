@@ -4,32 +4,43 @@
      ============================================================ */
 
   :root {
-    --verde: #176b43;
-    --verde-escuro: #0f5132;
-    --verde-claro: #e7f3ec;
-    --verde-medio: #c9e6d4;
+    --verde: #8a5a1f;
+    --verde-escuro: #6b4416;
+    --verde-claro: #f6eedf;
+    --verde-medio: #ead8b5;
+    /* "verde" é a cor principal (nome antigo): hoje é o dourado da logo.
+       Sucesso (pago, confirmado, salvo) continua verde: */
+    --sucesso: #2b7a47;
+    --sucesso-escuro: #1f5c35;
+    --sucesso-claro: #e6f2e8;
 
-    --fundo: #f5f6f4;
-    --superficie: #ffffff;
-    --borda: #e3e6e2;
-    --borda-forte: #cfd4ce;
+    /* Lado da marca no login (escuro nos dois temas, para a logo dourada) */
+    --marca-fundo-1: #3b2817;
+    --marca-fundo-2: #1f150c;
+    --marca-texto: #f3e7d3;
+    --marca-destaque: #e2bb72;
 
-    --texto: #1c2420;
-    --texto-suave: #5d6862;
-    --texto-fraco: #8b958f;
+    --fundo: #f7f3ec;
+    --superficie: #fffdf9;
+    --borda: #ebe3d5;
+    --borda-forte: #d8ccb8;
+
+    --texto: #2a2118;
+    --texto-suave: #6e6253;
+    --texto-fraco: #9a8f80;
 
     --vermelho: #b42318;
     --vermelho-claro: #fdecea;
-    --amarelo: #a15c07;
-    --amarelo-claro: #fef4e2;
+    --amarelo: #b4500a;
+    --amarelo-claro: #fdf0e4;
     --azul: #1d4ed8;
     --azul-claro: #e6eefe;
-    --cinza-claro: #eef0ee;
+    --cinza-claro: #f1ece3;
 
     --raio: 12px;
     --raio-pequeno: 8px;
-    --sombra: 0 1px 2px rgba(16, 24, 20, .05), 0 1px 3px rgba(16, 24, 20, .06);
-    --sombra-alta: 0 12px 32px rgba(16, 24, 20, .16);
+    --sombra: 0 1px 2px rgba(42, 33, 24, .05), 0 1px 3px rgba(42, 33, 24, .07);
+    --sombra-alta: 0 16px 40px rgba(42, 33, 24, .16);
 
     --largura-menu: 248px;
     --altura-barra-inferior: 64px;
@@ -38,32 +49,32 @@
 
     /* Cores de apoio (mudam no modo escuro) */
     --sobre-cor: #ffffff;
-    --verde-hover: #0f5132;
+    --verde-hover: #6b4416;
     --vermelho-hover: #8f1b13;
-    --texto-amarelo: #6b3d05;
+    --texto-amarelo: #7a3306;
     --texto-azul: #1e3a8a;
-    --fundo-suave: #fafbfa;
-    --brilho-a: #eceeec;
-    --brilho-b: #f6f7f6;
-    --topo-fundo: rgba(245, 246, 244, .9);
-    --cobertura: rgba(16, 24, 20, .45);
-    --cobertura-leve: rgba(16, 24, 20, .4);
-    --toast-fundo: #1c2420;
+    --fundo-suave: #fbf8f3;
+    --brilho-a: #efe8dc;
+    --brilho-b: #f7f2ea;
+    --topo-fundo: rgba(247, 243, 236, .9);
+    --cobertura: rgba(30, 20, 10, .45);
+    --cobertura-leve: rgba(30, 20, 10, .4);
+    --toast-fundo: #2a2118;
     --toast-texto: #ffffff;
-    --toast-sucesso: #6ee7a0;
+    --toast-sucesso: #8fd6a5;
     --toast-erro: #ffffff;
     --hover-leve: rgba(0, 0, 0, .08);
-    --pulso: rgba(23, 107, 67, .45);
-    --pulso-fim: rgba(23, 107, 67, 0);
+    --pulso: rgba(138, 90, 31, .45);
+    --pulso-fim: rgba(138, 90, 31, 0);
 
     /* Fundo animado do login */
-    --mancha-1: #2f9e66;
-    --mancha-2: #f2b25c;
-    --mancha-3: #9ed8b6;
-    --opacidade-mancha: .32;
-    --icone-flutuante: rgba(23, 107, 67, .30);
-    --pontilhado: rgba(23, 107, 67, .10);
-    --vidro-cartao: rgba(255, 255, 255, .86);
+    --mancha-1: #d9a441;
+    --mancha-2: #c7803e;
+    --mancha-3: #f0d9a8;
+    --opacidade-mancha: .34;
+    --icone-flutuante: rgba(138, 90, 31, .28);
+    --pontilhado: rgba(138, 90, 31, .10);
+    --vidro-cartao: rgba(255, 253, 249, .9);
 
     /* Gráficos (paleta conferida para daltonismo, claro e escuro) */
     --serie-1: #257de0;
@@ -83,57 +94,63 @@
      Ativado por data-tema="escuro" no <html>. O modo automático
      coloca esse atributo conforme a preferência do aparelho. */
   html[data-tema="escuro"] {
-    --verde: #3fb67a;
-    --verde-escuro: #7dd8a6;
-    --verde-claro: #15291e;
-    --verde-medio: #23503a;
+    --verde: #d4a24c;
+    --verde-escuro: #e7c27d;
+    --verde-claro: #2a1f14;
+    --verde-medio: #4a3720;
+    --sucesso: #5fb87f;
+    --sucesso-escuro: #8fd6a5;
+    --sucesso-claro: #17261b;
 
-    --fundo: #0e1311;
-    --superficie: #161c19;
-    --borda: #27302b;
-    --borda-forte: #39443e;
+    --marca-fundo-1: #2c1e11;
+    --marca-fundo-2: #120c06;
 
-    --texto: #e4eae6;
-    --texto-suave: #a2ada6;
-    --texto-fraco: #75807a;
+    --fundo: #14100b;
+    --superficie: #1d1710;
+    --borda: #2f261b;
+    --borda-forte: #43372a;
+
+    --texto: #efe6d8;
+    --texto-suave: #a69a88;
+    --texto-fraco: #7c7163;
 
     --vermelho: #f07167;
     --vermelho-claro: #351816;
-    --amarelo: #e9a94b;
-    --amarelo-claro: #33250f;
+    --amarelo: #e3954d;
+    --amarelo-claro: #33220f;
     --azul: #7ea6ff;
     --azul-claro: #162241;
-    --cinza-claro: #212924;
+    --cinza-claro: #262017;
 
     --sombra: 0 1px 2px rgba(0, 0, 0, .35), 0 1px 3px rgba(0, 0, 0, .3);
     --sombra-alta: 0 12px 32px rgba(0, 0, 0, .55);
 
-    --sobre-cor: #07130c;
-    --verde-hover: #5cc98f;
+    --sobre-cor: #1a140e;
+    --verde-hover: #e0b462;
     --vermelho-hover: #f48b82;
-    --texto-amarelo: #f3c77d;
+    --texto-amarelo: #f2bd85;
     --texto-azul: #b9ccff;
-    --fundo-suave: #1a211d;
-    --brilho-a: #1d2420;
-    --brilho-b: #262e29;
-    --topo-fundo: rgba(14, 19, 17, .88);
+    --fundo-suave: #1a140e;
+    --brilho-a: #211a12;
+    --brilho-b: #2a2117;
+    --topo-fundo: rgba(20, 16, 11, .88);
     --cobertura: rgba(0, 0, 0, .6);
     --cobertura-leve: rgba(0, 0, 0, .55);
-    --toast-fundo: #e4eae6;
-    --toast-texto: #0e1311;
-    --toast-sucesso: #176b43;
+    --toast-fundo: #efe6d8;
+    --toast-texto: #14100b;
+    --toast-sucesso: #2b7a47;
     --toast-erro: #b42318;
     --hover-leve: rgba(255, 255, 255, .1);
-    --pulso: rgba(63, 182, 122, .5);
-    --pulso-fim: rgba(63, 182, 122, 0);
+    --pulso: rgba(212, 162, 76, .5);
+    --pulso-fim: rgba(212, 162, 76, 0);
 
-    --mancha-1: #1f7a4d;
-    --mancha-2: #a8661c;
-    --mancha-3: #2c6b4b;
-    --opacidade-mancha: .38;
-    --icone-flutuante: rgba(125, 216, 166, .22);
-    --pontilhado: rgba(125, 216, 166, .07);
-    --vidro-cartao: rgba(22, 28, 25, .82);
+    --mancha-1: #8a5a1f;
+    --mancha-2: #6b3412;
+    --mancha-3: #5a4320;
+    --opacidade-mancha: .4;
+    --icone-flutuante: rgba(231, 194, 125, .2);
+    --pontilhado: rgba(231, 194, 125, .07);
+    --vidro-cartao: rgba(29, 23, 16, .86);
 
     --serie-1: #338ced;
     --serie-2: #e76624;
@@ -675,6 +692,184 @@
     color: var(--texto-fraco);
     font-size: 13px;
     margin: 18px 0 0;
+  }
+
+  /* ---------- LOGIN EM DOIS LADOS (marca + formulário) ----------
+     Computador: lado escuro com a logo dourada e o versículo do dia,
+     formulário ao lado. Celular: a marca vira uma faixa acima. */
+  #telaLogin { gap: 20px; padding: 32px 20px; }
+
+  .painel-login {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+    width: 100%;
+    max-width: 920px;
+    min-height: 560px;
+    border-radius: 24px;
+    overflow: hidden;
+    background: var(--vidro-cartao);
+    -webkit-backdrop-filter: blur(16px) saturate(1.2);
+    backdrop-filter: blur(16px) saturate(1.2);
+    border: 1px solid var(--borda);
+    box-shadow: var(--sombra-alta);
+    animation: entrarCartao .7s cubic-bezier(.2, .8, .2, 1) both;
+  }
+
+  .painel-marca {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 48px 40px;
+    color: var(--marca-texto);
+    text-align: center;
+    background:
+      radial-gradient(120% 70% at 50% 0%, rgba(226, 187, 114, .22), transparent 60%),
+      radial-gradient(90% 60% at 50% 110%, rgba(199, 128, 62, .25), transparent 65%),
+      linear-gradient(165deg, var(--marca-fundo-1), var(--marca-fundo-2));
+  }
+
+  /* Pontilhado dourado bem leve, sumindo para baixo */
+  .painel-marca::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-image: radial-gradient(rgba(226, 187, 114, .12) 1px, transparent 1px);
+    background-size: 18px 18px;
+    -webkit-mask-image: linear-gradient(to bottom, #000, transparent 75%);
+    mask-image: linear-gradient(to bottom, #000, transparent 75%);
+  }
+
+  /* Fio dourado entre os dois lados */
+  .painel-marca::after {
+    content: '';
+    position: absolute;
+    top: 12%;
+    bottom: 12%;
+    right: 0;
+    width: 1px;
+    background: linear-gradient(transparent, rgba(226, 187, 114, .5), transparent);
+  }
+
+  .painel-marca .logo-entrada { margin: 0; }
+
+  .painel-marca .logo-entrada img,
+  [data-tema="escuro"] .painel-marca .logo-entrada img {
+    width: 230px;
+    max-width: 80%;
+    filter: brightness(1.3) saturate(1.1) drop-shadow(0 8px 22px rgba(0, 0, 0, .35));
+  }
+
+  .painel-marca-frase {
+    margin: 0;
+    color: var(--marca-destaque);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    opacity: .9;
+  }
+
+  .painel-marca .versiculo-dia {
+    max-width: 320px;
+    margin-top: 18px;
+    padding-top: 22px;
+    border-top: 1px solid rgba(226, 187, 114, .22);
+  }
+
+  .painel-marca .versiculo-rotulo {
+    background: rgba(226, 187, 114, .14);
+    color: var(--marca-destaque);
+  }
+
+  .painel-marca .versiculo-dia blockquote {
+    color: var(--marca-texto);
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 18px;
+    font-weight: 400;
+  }
+
+  .painel-marca .versiculo-dia figcaption { color: var(--marca-destaque); }
+
+  #telaLogin .login-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    max-width: none;
+    padding: 48px 44px;
+    background: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    animation: none;
+  }
+
+  .login-sobretitulo {
+    color: var(--verde);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+  }
+
+  #telaLogin .login-card h1 { margin: 6px 0 4px; font-size: 28px; }
+
+  /* Campos com ícone à esquerda */
+  .campo-com-icone { position: relative; }
+
+  .campo-com-icone .campo-icone {
+    position: absolute;
+    left: 13px;
+    top: 50%;
+    display: flex;
+    width: 18px;
+    height: 18px;
+    transform: translateY(-50%);
+    color: var(--texto-fraco);
+    pointer-events: none;
+    transition: color .15s ease;
+  }
+
+  .campo-com-icone .campo-icone svg { width: 18px; height: 18px; }
+  #telaLogin .campo-com-icone input { padding-left: 42px; }
+  .campo-com-icone:focus-within .campo-icone { color: var(--verde); }
+
+  #telaLogin .botao-entrar {
+    min-height: 46px;
+    font-size: 15px;
+    background: linear-gradient(180deg, #9d6a28, var(--verde));
+    box-shadow: 0 6px 16px rgba(138, 90, 31, .28);
+  }
+
+  [data-tema="escuro"] #telaLogin .botao-entrar {
+    background: linear-gradient(180deg, #e2b866, var(--verde));
+    box-shadow: 0 6px 16px rgba(212, 162, 76, .22);
+  }
+
+  #telaLogin .botao-entrar:hover:not(:disabled) { background: var(--verde-hover); }
+
+  @media (max-width: 860px) {
+    #telaLogin { padding: 20px 14px; gap: 14px; }
+    .painel-login { grid-template-columns: 1fr; max-width: 440px; min-height: 0; border-radius: 20px; }
+    .painel-marca { padding: 28px 22px 24px; gap: 10px; }
+    .painel-marca::after { display: none; }
+    .painel-marca .logo-entrada img,
+    [data-tema="escuro"] .painel-marca .logo-entrada img { width: 160px; }
+    .painel-marca .versiculo-dia { margin-top: 6px; padding-top: 14px; }
+    .painel-marca .versiculo-dia blockquote { font-size: 15px; }
+    #telaLogin .login-card { padding: 26px 22px 22px; }
+    #telaLogin .login-card h1 { font-size: 24px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .painel-login { animation: none; }
   }
 
   /* ---------- ESTRUTURA DO APLICATIVO ---------- */
@@ -1280,8 +1475,8 @@
   .alerta .texto { flex: 1; min-width: 0; }
   .alerta .botao { flex-shrink: 0; }
 
-  .alerta.ok { background: var(--verde-claro); color: var(--verde-escuro); }
-  .alerta.ok svg { color: var(--verde); }
+  .alerta.ok { background: var(--sucesso-claro); color: var(--sucesso-escuro); }
+  .alerta.ok svg { color: var(--sucesso); }
 
   .alerta.info { background: var(--azul-claro); color: var(--texto-azul); }
   .alerta.info svg { color: var(--azul); }
@@ -1315,7 +1510,7 @@
     background: currentColor;
   }
 
-  .etiqueta-verde { background: var(--verde-claro); color: var(--verde); }
+  .etiqueta-verde { background: var(--sucesso-claro); color: var(--sucesso); }
   .etiqueta-azul { background: var(--azul-claro); color: var(--azul); }
   .etiqueta-cinza { background: var(--cinza-claro); color: var(--texto-suave); }
   .etiqueta-vermelha { background: var(--vermelho-claro); color: var(--vermelho); }
@@ -1740,7 +1935,7 @@
 
   .estado-salvamento.salvando,
   .estado-salvamento.pendente { color: var(--amarelo); }
-  .estado-salvamento.salvo { color: var(--verde); }
+  .estado-salvamento.salvo { color: var(--sucesso); }
   .estado-salvamento.erro { color: var(--vermelho); font-weight: 600; }
 
   .grade-cardapio {
