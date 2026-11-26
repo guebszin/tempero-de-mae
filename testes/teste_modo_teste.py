@@ -15,7 +15,15 @@ async def entrar(pg,u,s,lembrar=False):
     await pg.click('#formLogin button[type=submit]')
     await pg.wait_for_selector('#app:not([hidden]), #erroLogin:not([hidden])'); await pg.wait_for_timeout(600)
 async def ir(pg,tela):
-    await pg.click('#menuLateral [data-tela=%s]'%tela); await pg.wait_for_timeout(900)
+    seletor='#menuLateral [data-tela=%s]'%tela
+    try:
+        await pg.wait_for_selector(seletor, state='visible', timeout=20000)
+    except Exception:
+        info=await pg.evaluate("({tamanho:[innerWidth,innerHeight], corpo:document.body.className, app:!document.getElementById('app').hidden, login:!document.getElementById('telaLogin').hidden, carregando:!document.getElementById('telaCarregando').hidden, faixa:!document.getElementById('faixaTeste').hidden, toasts:document.getElementById('toasts').innerText})")
+        print('DIAGNOSTICO ir(%s):'%tela, info)
+        await pg.screenshot(path='v21/erro_%s.png'%tela)
+        raise
+    await pg.click(seletor); await pg.wait_for_timeout(1500)
 async def real(pg): return await pg.evaluate("localStorage.getItem('abas')")
 async def abrir_conta(pg):
     await pg.click('#botaoConta'); await pg.wait_for_timeout(200)

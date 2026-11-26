@@ -27,7 +27,7 @@ for t in teste_*.py; do
     primeira="$saida"
     rodar "$t"
     if [ -n "$problemas" ]; then
-      echo "✗ $t"; echo "$saida" | grep -v "^OK" | tail -25
+      echo "✗ $t"; echo "$saida" | tail -40
       FALHAS=$((FALHAS + 1))
       continue
     fi

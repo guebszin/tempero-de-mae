@@ -158,7 +158,9 @@ async def main():
 
         # ---------- 7. MENSAGEM DO CONVITE PERSONALIZADA ----------
         txt=pg.locator('#configuracoesConteudo textarea')
-        await txt.fill('Oi {responsavel}, sem link aqui'); await pg.click('button:has-text("Salvar mensagem")'); await pg.wait_for_timeout(800)
+        await txt.fill('Oi {responsavel}, sem link aqui'); await pg.click('button:has-text("Salvar mensagem")')
+        try: await pg.wait_for_function("document.getElementById('toasts').innerText.indexOf('precisa ter {link}')>=0", timeout=10000)
+        except Exception: pass
         ok(await pg.locator('#toasts').inner_text()!='' and 'precisa ter {link}' in await pg.locator('#toasts').inner_text(), 'exige {link} na mensagem')
         await txt.fill('Oi {responsavel}! Crie sua senha da {empresa}: {link} (usuário {usuario})'); await pg.click('button:has-text("Salvar mensagem")'); await pg.wait_for_timeout(800)
         c=await pg.evaluate(chamar(ADM+"const e=w.listarEmpresas(tk).find(x=>x.nome_empresa==='Padaria Sol'); w.__novaExecucao(); return w.gerarConviteEmpresa(tk,e.empresa_id)"))
