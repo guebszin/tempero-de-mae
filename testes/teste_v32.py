@@ -1,4 +1,4 @@
-# Versão 32: tutorial de boas-vindas com o apresentador
+# Versão 32: tutorial de boas-vindas (v33: sem o personagem)
 import asyncio, os, json
 from playwright.async_api import async_playwright
 erros=[]
@@ -41,7 +41,7 @@ async def main():
         ok(await tutorial_aberto(pg), 'tutorial abre sozinho no primeiro acesso')
         total=int((await passo(pg)).split(' de ')[1])
         ok((await passo(pg)).startswith('Passo 1 de') and total>=8, 'mostra o passo 1 (%s)'%await passo(pg))
-        ok(await pg.evaluate("document.querySelector('.tutorial-personagem').naturalWidth>0"), 'apresentador carregado')
+        ok(await pg.evaluate("!document.querySelector('.tutorial-personagem, .tutorial img')"), 'sem personagem (removido na v33)')
         ok(await pg.is_hidden('.tutorial-voltar') and (await pg.inner_text('.tutorial-proximo'))=='Vamos lá', 'primeiro passo: sem "Voltar", botão "Vamos lá"')
         ok(not await pg.evaluate("document.querySelector('.tutorial-holofote').classList.contains('com-alvo')"), 'boas-vindas sem destaque no menu')
         await pg.screenshot(path='v32/01_boas_vindas.png')

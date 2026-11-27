@@ -3234,8 +3234,8 @@
     }
   }
   /* ---------- TUTORIAL DE BOAS-VINDAS ----------
-     Apresentador à esquerda, balão com o texto à direita. O "holofote"
-     escurece a tela e deixa iluminado o item do menu do passo. */
+     Janela com o texto do passo. O "holofote" escurece a tela e deixa
+     iluminado o item do menu do passo. */
   .tutorial {
     position: fixed;
     inset: 0;
@@ -3268,34 +3268,18 @@
     position: fixed;
     left: 50%;
     bottom: 32px;
-    display: grid;
-    grid-template-columns: 210px minmax(0, 1fr);
-    align-items: end;
-    width: min(660px, calc(100vw - 32px));
+    width: min(500px, calc(100vw - 32px));
     transform: translateX(-50%);
   }
 
   /* No computador, centraliza na área ao lado do menu lateral */
   @media (min-width: 901px) {
-    .tutorial-caixa { left: calc(50% + 124px); width: min(660px, calc(100vw - 280px)); }
+    .tutorial-caixa { left: calc(50% + 124px); width: min(500px, calc(100vw - 280px)); }
   }
 
-  .tutorial-personagem {
-    position: relative;
-    z-index: 1;
-    width: 240px;
-    max-width: none;
-    margin: 0 -30px -2px -10px;
-    filter: drop-shadow(0 10px 18px rgba(0, 0, 0, .35));
-    user-select: none;
-    pointer-events: none;
-    transform-origin: 50% 100%;
-    animation: tutorialPersonagem .55s cubic-bezier(.2, .9, .3, 1.2) both;
-  }
 
   .tutorial-balao {
     position: relative;
-    margin-bottom: 18px;
     padding: 22px 24px 18px;
     border: 1px solid var(--borda);
     border-radius: 20px;
@@ -3304,19 +3288,6 @@
     box-shadow: var(--sombra-alta);
   }
 
-  /* Ponta do balão, apontando para o apresentador */
-  .tutorial-balao::before {
-    content: '';
-    position: absolute;
-    left: -9px;
-    bottom: 54px;
-    width: 16px;
-    height: 16px;
-    border-left: 1px solid var(--borda);
-    border-bottom: 1px solid var(--borda);
-    background: var(--superficie);
-    transform: rotate(45deg);
-  }
 
   .tutorial-passo {
     display: inline-block;
@@ -3366,43 +3337,33 @@
 
   .tutorial-pular:hover { color: var(--texto); text-decoration: underline; }
   .tutorial-pular { white-space: nowrap; }
-  .tutorial-pular-curto { display: none; }
   .tutorial-pular[hidden] + .tutorial-voltar { margin-left: auto; }
 
   .tutorial-caixa.trocando .tutorial-balao { animation: tutorialBalao .35s ease both; }
-  .tutorial-caixa.trocando .tutorial-personagem { animation: tutorialAceno .5s ease both; }
 
   @keyframes tutorialEntrar { from { opacity: 0; } to { opacity: 1; } }
   @keyframes tutorialSair { to { opacity: 0; } }
-  @keyframes tutorialPersonagem { from { opacity: 0; transform: translateY(30px) scale(.92); } to { opacity: 1; transform: none; } }
   @keyframes tutorialBalao { from { opacity: .4; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-  @keyframes tutorialAceno { 0%, 100% { transform: none; } 40% { transform: rotate(-2deg) translateY(-3px); } }
   @keyframes tutorialPulso {
     0%, 100% { outline-color: var(--verde); }
     50% { outline-color: transparent; }
   }
 
-  /* Celular: apresentador menor, acima da barra de baixo */
+  /* Celular: acima da barra de baixo */
   @media (max-width: 900px) {
     .tutorial-caixa {
-      bottom: calc(84px + env(safe-area-inset-bottom, 0px));
-      grid-template-columns: 96px minmax(0, 1fr);
+      bottom: calc(94px + env(safe-area-inset-bottom, 0px));
       width: calc(100vw - 20px);
     }
-    .tutorial-personagem { width: 120px; margin: 0 -18px -2px -12px; }
-    .tutorial-balao { margin-bottom: 10px; padding: 16px 16px 14px; border-radius: 16px; }
-    .tutorial-balao::before { bottom: 36px; }
+    .tutorial-balao { padding: 16px 16px 14px; border-radius: 16px; }
     .tutorial-balao h2 { font-size: 18px; }
     .tutorial-texto { font-size: 14px; }
     .tutorial-pontos { margin: 12px 0 10px; }
     .tutorial-acoes .botao { padding-left: 12px; padding-right: 12px; }
-    .tutorial-pular-longo { display: none; }
-    .tutorial-pular-curto { display: inline; }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .tutorial, .tutorial-personagem, .tutorial-caixa.trocando .tutorial-balao,
-    .tutorial-caixa.trocando .tutorial-personagem, .tutorial-holofote.com-alvo { animation: none; }
+    .tutorial, .tutorial-caixa.trocando .tutorial-balao, .tutorial-holofote.com-alvo { animation: none; }
     .tutorial-holofote { transition: none; }
   }
 

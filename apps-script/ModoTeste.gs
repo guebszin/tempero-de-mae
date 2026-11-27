@@ -522,8 +522,10 @@ function preencherDadosTeste_(planilha, linhaDono, linhasConfig, donoId) {
       const total = Math.round(doPeriodo.reduce((s, x) => s + x.valor, 0) * 100) / 100;
       const quantidade = doPeriodo.reduce((s, x) => s + x.quantidade, 0);
       const emissao = somarDiasTexto_(p.fim, 1);
-      const vencimento = somarDiasTexto_(emissao, r.dados.dias);
       const ultima = i === periodos.length - 1;
+      let vencimento = somarDiasTexto_(emissao, r.dados.dias);
+      // Sempre há uma cobrança ainda no prazo ("a receber"), qualquer que seja o dia
+      if (indice === 1 && ultima && vencimento < hoje) vencimento = somarDiasTexto_(hoje, 7);
 
       // Situações variadas para testar
       let desconto = 0;
