@@ -5,7 +5,7 @@ O código em `apps-script/` é enviado ao projeto do Apps Script com o **clasp**
 - Projeto do Apps Script: `1kqeSQxoFlw3qV4bEhy3W3VqhR26jWki39oO9bnrVfklAmw-j6yX3Mjkx` (em `.clasp.json`)
 - Implantação (App da Web): `AKfycbzjFyTv6So_5jGqcm1yUgIzOG_3Z1fg2RgHpFeXkmjxSgXUWXMlPXIz-bwW3-jAkNO0zQ`
 - Endereço: https://script.google.com/macros/s/AKfycbzjFyTv6So_5jGqcm1yUgIzOG_3Z1fg2RgHpFeXkmjxSgXUWXMlPXIz-bwW3-jAkNO0zQ/exec
-- Versão no ar: **32** (26/11/2026)
+- Versão no ar: **33** (27/11/2026)
 
 > ⚠️ O `clasp push` **substitui todos os arquivos** do projeto pelo que está em `apps-script/`. Mudanças feitas direto no editor do Google e não trazidas para cá serão perdidas. Escolha um lugar para editar (de preferência aqui) — ou rode `npm run baixar` antes, para trazer o que mudou no editor.
 
