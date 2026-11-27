@@ -306,7 +306,7 @@ function podePedirPrazoExtra() {
 function criarCartaoPrazoExtra() {
   const e = pedidoEmpresa.estado;
   const situacao = e.prazo_extra;
-  const minutos = e.minutos_prazo_extra || 30;
+  const minutos = e.minutos_prazo_extra || 10;
   const cartao = el('div', 'cartao cartao-prazo-extra');
 
   if (situacao.status === 'PENDENTE') {
@@ -1178,7 +1178,7 @@ function renderizarPedidosDia(dia) {
 
 // ---------- PRAZO EXTRA (restaurante) ----------
 function criarPainelPrazosExtras(dia) {
-  const minutos = dia.minutos_prazo_extra || 30;
+  const minutos = dia.minutos_prazo_extra || 10;
   const pendentes = dia.prazos_extras.filter(function(s) { return s.status === 'PENDENTE'; });
   const respondidos = dia.prazos_extras.filter(function(s) { return s.status !== 'PENDENTE'; });
   const caixa = el('div', 'painel-prazos-extras');

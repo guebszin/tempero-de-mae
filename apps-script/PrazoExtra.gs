@@ -2,12 +2,12 @@
 // PRAZOEXTRA.gs
 // Pedido de prazo extra: passou do horário limite, a empresa pede ao
 // restaurante para ainda fazer ou alterar o pedido de hoje. Se o
-// restaurante liberar, a empresa ganha 30 minutos (contados a partir
+// restaurante liberar, a empresa ganha 10 minutos (contados a partir
 // da liberação). Vale só para aquele dia; no dia seguinte volta o
 // horário normal.
 // Aba PRAZOS_EXTRAS: uma linha por pedido de prazo.
 // ================================================================
-const MINUTOS_PRAZO_EXTRA = 30;
+const MINUTOS_PRAZO_EXTRA = 10;
 const MAXIMO_PEDIDOS_PRAZO_POR_DIA = 3;
 
 const COLUNAS_PRAZOS = {

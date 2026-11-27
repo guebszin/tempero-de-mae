@@ -230,7 +230,7 @@ Cópia dos funcionários excluídos pelo proprietário.
 
 ## PRAZOS_EXTRAS
 
-Pedidos de prazo extra: depois do horário limite, a empresa pede mais tempo; se o restaurante liberar, ela tem 30 minutos (a partir da liberação) para enviar ou alterar o pedido daquele dia. `status`: PENDENTE, LIBERADO ou RECUSADO.
+Pedidos de prazo extra: depois do horário limite, a empresa pede mais tempo; se o restaurante liberar, ela tem 10 minutos (a partir da liberação) para enviar ou alterar o pedido daquele dia. `status`: PENDENTE, LIBERADO ou RECUSADO.
 
 | # | Coluna |
 |---|---|

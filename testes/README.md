@@ -19,7 +19,7 @@ python3 teste_modo_teste.py
 | `teste_cobrancas.py` | Cobranças, ciclos, pagamentos parciais, extrato |
 | `teste_v20.py` | Dashboard, permissões de administradores, convites, descontos |
 | `teste_modo_teste.py` | Modo teste: dados fictícios, isolamento da planilha real, descarte |
-| `teste_v25.py` | Cardápio de segunda a domingo, dias fechados, prazo extra de 30 minutos e relatório financeiro por empresa |
+| `teste_v25.py` | Cardápio de segunda a domingo, dias fechados, prazo extra de 10 minutos e relatório financeiro por empresa |
 | `teste_v26.py` | Modo teste: "Ver como empresa" (entrar, telas da empresa, segurança, voltar, sair do teste) e versículo do dia no Início |
 | `teste_v27.py` | "Manter conectado até o fim do dia": entrada vale só no dia, aba aberta e login salvo expiram à meia-noite, login salvo antigo recusado |
 | `teste_v28.py` | Assinatura "Feito por Luis Guilherme Wermelinger" no login e no Início (visível, inclusive no celular) |

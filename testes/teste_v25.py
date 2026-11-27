@@ -110,7 +110,7 @@ async def main():
         await sair(pg)
         await entrar(pg,'alfa@x.com','abc123')
         await pg.evaluate("irPara('pedidos-empresa')"); await pg.wait_for_selector('.cartao-prazo-extra', timeout=10000)
-        ok('Pedir mais 30 minutos' in await pg.inner_text('.cartao-prazo-extra'), 'depois do horário aparece "Pedir mais 30 minutos"')
+        ok('Pedir mais 10 minutos' in await pg.inner_text('.cartao-prazo-extra'), 'depois do horário aparece "Pedir mais 10 minutos"')
         await pg.screenshot(path='v25/04_empresa_pedir_prazo.png', full_page=True)
         await pg.fill('#mensagemPrazoExtra','Esquecemos de pedir hoje')
         await pg.click(".cartao-prazo-extra button:has-text('Pedir mais')")
@@ -133,13 +133,13 @@ async def main():
         await pg.click(".prazo-extra-pedido button:has-text('Liberar')")
         await pg.wait_for_selector('.prazo-extra-item.liberado', timeout=10000)
         hist=await pg.inner_text('.prazo-extra-historico')
-        ok('até 10:00' in hist, 'liberado até 10:00 (30 min a partir de 09:30): '+hist)
+        ok('até 09:40' in hist, 'liberado até 09:40 (10 min a partir de 09:30): '+hist)
         await pg.screenshot(path='v25/07_restaurante_liberado.png')
 
-        # Empresa agora pode pedir até 10:00
-        await pg.evaluate(relogio(dia(0),9,45))
+        # Empresa agora pode pedir até 09:40
+        await pg.evaluate(relogio(dia(0),9,35))
         e=await pg.evaluate(chamar(EMP+"return w.obterPedidoEmpresa(te).prazo;"))
-        ok(e['aberto'] and e['prazo_extra'] and e['limite']=='10:00', 'empresa com prazo extra até 10:00')
+        ok(e['aberto'] and e['prazo_extra'] and e['limite']=='09:40', 'empresa com prazo extra até 09:40')
         r=await pg.evaluate(chamar(EMP+"const est=w.obterPedidoEmpresa(te); w.__novaExecucao(); return w.salvarPedidoEmpresa(te,{itens:est.funcionarios.map(f=>({funcionario_id:f.funcionario_id,proteina:'Frango',opcao_extra:'',itens_removidos:[],observacao:''}))}).mensagem;"))
         ok('enviado' in r.lower(), 'pedido enviado no prazo extra')
         # Outra empresa não ganha o prazo
