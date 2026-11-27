@@ -54,6 +54,7 @@ const ICONES = {
   olho: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   alerta: '<path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/>',
   check: '<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/>',
+  ajuda: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17h.01"/>',
   erro: '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>',
   busca: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
   editar: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/>',
@@ -1025,6 +1026,7 @@ document.addEventListener('click', function(evento) {
 
   if (acao.dataset.acao === 'sair') sair();
   if (acao.dataset.acao === 'trocar-senha') abrirTrocarSenha();
+  if (acao.dataset.acao === 'tutorial' && typeof abrirTutorial === 'function') abrirTutorial();
   if (acao.dataset.acao === 'modo-teste') entrarModoTeste();
   if (acao.dataset.acao === 'sair-teste') sairModoTeste();
   if (acao.dataset.acao === 'ver-como-empresa') escolherEmpresaParaVer();
@@ -1105,6 +1107,7 @@ function loginSalvoAoAbrir() {
 }
 
 function mostrarLogin() {
+  if (typeof fecharTutorial === 'function') fecharTutorial(true);
   $('telaCarregando').hidden = true;
   $('app').hidden = true;
   $('telaConvite').hidden = true;

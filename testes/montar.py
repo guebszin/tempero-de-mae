@@ -6,6 +6,8 @@ idx=ler('Index.html')
 idx=re.sub(r"<\?!= incluir\('(\w+)'\); \?>", lambda m: ler(m.group(1)+'.html'), idx)
 assert '<?' not in idx
 shim = """<script>
+// Testes antigos: sem o tutorial de boas-vindas (o teste_v32 liga com __semTutorial=false)
+if (window.__semTutorial === undefined) window.__semTutorial = true;
 window.google={script:{url:{getLocation:function(cb){var p={};new URLSearchParams(location.search).forEach(function(v,k){p[k]=v;});setTimeout(function(){cb({parameter:p,parameters:{},hash:''});},10);}},history:{replace:function(){window.__historicoLimpo=true;}},run:(function(){
   function criar(sucesso,falha){
     return new Proxy({},{get:function(_,nome){

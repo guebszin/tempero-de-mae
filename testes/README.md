@@ -26,6 +26,7 @@ python3 teste_modo_teste.py
 | `teste_v29.py` | Logo do restaurante: login, primeiro acesso, menu lateral (símbolo + nome) e cabeçalho das impressões/PDF |
 | `teste_v30.py` | Cores da logo (dourado/terra, sucesso verde) e login em dois lados: layout, contraste, ícones nos campos, escuro e celular |
 | `teste_v31.py` | Tema escuro azul-noite com dourado: cores, contraste dos textos e status, tema claro inalterado |
+| `teste_v32.py` | Tutorial de boas-vindas: abre no 1º acesso, holofote no menu, teclado, rever pelo menu, modo teste/ver como empresa, celular e escuro |
 | `teste_periodo_versiculo.py` | Dashboard com datas escolhidas no calendário e versículo do dia no login |
 | `teste_excluir_historico.py` / `teste_limpeza.py` | Exclusões do proprietário com histórico |
 | `teste_tema.py` | Tema claro, escuro e automático |

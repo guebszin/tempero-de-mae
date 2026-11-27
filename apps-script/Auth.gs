@@ -315,6 +315,7 @@ function comRecursos_(sessao) {
   } catch (erro) {
     copia.recursos = null;
   }
+  copia.tutorial_visto = tutorialVisto_(sessao);
   return copia;
 }
 
